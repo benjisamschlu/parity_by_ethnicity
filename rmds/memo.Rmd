@@ -1,0 +1,32 @@
+---
+title: "Memo"
+toc: false
+output: 
+        pdf_document:
+                extra_dependencies: ["float"]
+---
+
+* HFD protocol on exposure per parity
+
+* Back of the envelope calculation accounting for parity
+
+$$\sum_x P_x \cdot M_x \cdot (\sum^5_j p_j\cdot j)$$
+
+* Define potential project on NSFG data
+
+    * 2006-2019 NSFG data
+    
+    * Race, Age (in 5 years?)
+    
+    * Geography?
+    
+    * Metrics of interest: childlessness at end of reproduction, variance in probability of childless
+    
+    * Modeling opportunity? (ie Multinomial with parametric forms on the ps)
+
+
+* Modeling: multinomial with model on ps, over time, by age, sex (and geographical location) + focus on childlessness 
+
+
+
+
