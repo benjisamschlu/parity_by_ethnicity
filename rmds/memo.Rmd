@@ -6,6 +6,20 @@ output:
                 extra_dependencies: ["float"]
 ---
 
+Potential to model only childlessness by states or race or both
+
+# Functional form
+
+* Candidates: Richards, Janoschek, Logistic
+
+* Generalized logistic (Richards) curve with only an additional parameter for the lower asymptote seems to do a good job.
+
+* Try optimizing with optim()
+
+# Data
+
+* Info on States available in CPS?
+
 * HFD protocol on exposure per parity
 
 * Back of the envelope calculation accounting for parity
