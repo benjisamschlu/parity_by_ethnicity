@@ -11,7 +11,7 @@ source(here("code", "secrets.R"))
 
 ## Load data -------------------------------------------------------------------
 
-## Adapt code below to work on frever
+
 ## Careful about age of mother: not the same boundaries over the years
 # https://cps.ipums.org/cps-action/variables/FREVER#universe_section
 
@@ -44,7 +44,8 @@ names(data) <- tolower(names(data))
 ## Tidy
 df <- data |> 
     ## Only keep year where frever (nber of children
-    ## ever born) was recorded
+    ## ever born) was recorded.
+    ## Recorded only for females.
     filter(!is.na(frever)) |> 
     dplyr::select(
         year, month, serial,pernum, ## identification
@@ -61,11 +62,30 @@ df <- data |>
     ) |> 
     ## Keep only women since 1990, 
     ## aged 15-45 not having 999
+    ## only in latest CPS that itwees
+    ## are until 50 yo
+    ## !! Men don't have info on frever !!
     filter(year >= 1990,
-           sex == 2,
            age >= 15,
            age < 45,
            frever != 999)
+
+## Childlessness
+df.chldness <- df |>  
+    mutate(
+        ## Rescale weights
+        w = wtfinl/1000,
+        ## Create 4+ nber of minor
+        childless = ifelse(frever == 0, 1, 0)
+    ) |> 
+    group_by(age, year, 
+             .drop = F) |> 
+    summarise(y = sum(w[childless == 1]),
+              n = sum(w)) 
+
+## Store data for modeling
+saveRDS(df.chldness,
+        here("data", "df_chldness.rda"))
 
 ## Parity per age 
 df.p <- df |> 
@@ -83,6 +103,10 @@ df.p <- df |>
               p3 = sum(w[nchild == 3])/sum(w),
               p4 = sum(w[nchild == 4])/sum(w)) 
 
+## Store data for modeling
+saveRDS(df.p,
+        here("data", "df_p.rda"))
+
 ## Parity per age, and race
 df.p.race <- df |> 
     mutate(
@@ -98,6 +122,10 @@ df.p.race <- df |>
               p2 = sum(w[nchild == 2])/sum(w),
               p3 = sum(w[nchild == 3])/sum(w),
               p4 = sum(w[nchild == 4])/sum(w)) 
+
+## Store data for modeling
+saveRDS(df.p.race,
+        here("data", "df_p_race.rda"))
 
 ## Parity per age, and states
 df.p.states <- df |> 
@@ -120,7 +148,6 @@ combined.df <- bind_rows(
     df.p |> 
         pivot_longer(p0:p4, names_to = "parity", values_to = "p") |> 
         mutate(sex = ifelse(sex == 2, "Female", "Male")) |> 
-        filter(sex == "Female") |> 
         mutate(source = "CPS"),
     df.p.hfd |> 
         dplyr::select(-c(OpenInterval, Ex)) |> 
@@ -143,6 +170,7 @@ df.p |>
     ggplot(aes(x = age, y = p, 
                group = parity,
                col = parity)) + 
+    facet_wrap(~ sex) +
     geom_line(linewidth = 1) +
     theme_bw()
 

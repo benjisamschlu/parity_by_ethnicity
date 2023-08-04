@@ -12,7 +12,7 @@ source(here("code", "secrets.R"))
 ## Load data -------------------------------------------------------------------
 
 ## read_csv allows to open compressed .gz 
-data <- read_csv(here("data_private", "cps_00004.csv.gz"))
+data <- read_csv(here("data_private", "cps_00005.csv.gz"))
 
 exppa <- readHFDweb(CNTRY = "USA",
                     item = "exposRRpa",

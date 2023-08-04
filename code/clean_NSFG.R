@@ -9,7 +9,7 @@ source(here("code", "secrets.R"))
 
 
 ## install_github( "ajdamico/lodown" , dependencies = TRUE )
-library(lodown)
+# library(lodown)
 
 
 
@@ -27,7 +27,7 @@ library(lodown)
 # # Download the microdata to your local computer
 # nsfg_cat <- lodown( "nsfg" , nsfg_cat )
 ## Load data
-nsfg_df <- readRDS( here("data_raw" , "2017_2019_FemRespData.rds" ) )
+nsfg_df <- readRDS( here("data_private" , "2017_2019_FemRespData.rds" ) )
 
 ## HFD
 
