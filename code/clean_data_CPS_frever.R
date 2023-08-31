@@ -4,6 +4,7 @@ rm(list=ls())
 library(tidyverse)
 library(here)
 library(HMDHFDplus)
+library(rvest)
 
 source(here("code", "secrets.R"))
 
@@ -18,8 +19,18 @@ source(here("code", "secrets.R"))
 ## read_csv allows to open compressed .gz 
 data <- read_csv(here("data_private", "cps_00005.csv.gz"))
 
+## Wikipedia pages with States names and fip codes 
+page = read_html("https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code")
+# Obtain the piece of the web page that corresponds to the "wikitable" node
+fip.table = html_node(page, ".wikitable")
+# Convert the html table element into a data frame
+fip.table = html_table(fip.table, fill = TRUE)
+# Tidying 
+fip.table <- fip.table |> 
+    filter(`Alpha code` != "") |> 
+    dplyr::select(name = Name, statefip = `Numeric code`)
 
-
+## HMD data
 exppa <- readHFDweb(CNTRY = "USA",
                     item = "exposRRpa",
                     username = usr,
@@ -46,7 +57,8 @@ df <- data |>
     ## Only keep year where frever (nber of children
     ## ever born) was recorded.
     ## Recorded only for females.
-    filter(!is.na(frever)) |> 
+    filter(!is.na(frever),
+           sex == 2) |> 
     dplyr::select(
         year, month, serial,pernum, ## identification
         momloc, momloc2, poploc, poploc2, frever,## parenthood
@@ -77,11 +89,21 @@ df.chldness <- df |>
         w = wtfinl/1000,
         ## Create 4+ nber of minor
         childless = ifelse(frever == 0, 1, 0)
-    ) |> 
-    group_by(age, year, 
-             .drop = F) |> 
-    summarise(y = sum(w[childless == 1]),
-              n = sum(w)) 
+        ) |> 
+    group_by(
+        age, year, statefip, race_eth,
+        .drop = F
+        ) |> 
+    summarise(
+        y = sum(w[childless == 1]),
+        n = sum(w)
+        ) |> 
+    ## Add States names
+    left_join(
+        fip.table,
+        by = c("statefip")
+    )
+    
 
 ## Store data for modeling
 saveRDS(df.chldness,
@@ -95,7 +117,7 @@ df.p <- df |>
         ## Create 4+ nber of minor
         nchild = ifelse(frever >= 4, 4, frever)
     ) |> 
-    group_by(age, sex, year, 
+    group_by(age, year, 
              .drop = F) |> 
     summarise(p0 = sum(w[nchild == 0])/sum(w),
               p1 = sum(w[nchild == 1])/sum(w),
@@ -115,7 +137,7 @@ df.p.race <- df |>
         ## Create 4+ nber of minor
         nchild = ifelse(frever >= 4, 4, frever)
     ) |> 
-    group_by(age, sex, year, race_eth, 
+    group_by(age, year, race_eth, 
              .drop = F) |> 
     summarise(p0 = sum(w[nchild == 0])/sum(w),
               p1 = sum(w[nchild == 1])/sum(w),
@@ -135,7 +157,7 @@ df.p.states <- df |>
         ## Create 4+ nber of minor
         nchild = ifelse(frever >= 4, 4, frever)
     ) |> 
-    group_by(age, sex, year, statefip, 
+    group_by(age, year, statefip, 
              .drop = F) |> 
     summarise(p0 = sum(w[nchild == 0])/sum(w),
               p1 = sum(w[nchild == 1])/sum(w),
@@ -165,12 +187,10 @@ combined.df <- bind_rows(
 ## CPS Fertility data 2020
 df.p |> 
     pivot_longer(p0:p4, names_to = "parity", values_to = "p") |> 
-    mutate(sex = ifelse(sex == 2, "Female", "Male")) |> 
     filter(year == 2020) |> 
     ggplot(aes(x = age, y = p, 
                group = parity,
                col = parity)) + 
-    facet_wrap(~ sex) +
     geom_line(linewidth = 1) +
     theme_bw()
 
@@ -188,7 +208,6 @@ combined.df |>
 ## CPS Fertility data 2020 by race
 df.p.race |> 
     pivot_longer(p0:p4, names_to = "parity", values_to = "p") |> 
-    mutate(sex = ifelse(sex == 2, "Female", "Male")) |> 
     filter(year == 2020) |> 
     ggplot(aes(x = age, y = p, 
                group = parity,
@@ -200,7 +219,6 @@ df.p.race |>
 ## CPS Fertility data 2020 by states
 df.p.states |> 
     pivot_longer(p0:p4, names_to = "parity", values_to = "p") |> 
-    mutate(sex = ifelse(sex == 2, "Female", "Male")) |> 
     filter(year == 2020) |> 
     ggplot(aes(x = age, y = p, 
                group = parity,
