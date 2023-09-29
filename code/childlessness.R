@@ -41,13 +41,15 @@ df |>
 states.names <- unique(df$name)
 states.drawn <- sample(states.names, 10)
 df |> 
-    filter(name %in% states.drawn) |> 
+    #filter(name %in% states.drawn) |> 
     group_by(age, year, name) |> 
     summarise(across(y:n, sum),
               p = y/n) |> 
     ungroup() |> 
     ggplot(aes(x = age, y = p, group = year, col = year)) + 
-    facet_grid(~ name) +
+    facet_wrap(~ name,
+               ncol = 10,
+               nrow = 6) +
     geom_line() +
     theme_bw()
 
@@ -184,7 +186,7 @@ stan_data <- list(# Dimensions
     Y_obs = n.years,
     A = n.ages,
     age = ages,
-    R = n.races,
+    G = n.races,
     # Careful !!
     # Structured as vector but order super important !!!
     # Needs to coincide with logmx_ord in STAN (multiple to_vector() )
@@ -201,9 +203,9 @@ nsim = (niter-nwarmup)*nchains
 options(mc.cores = parallel::detectCores()-1)
 
 ## STAN fit
-pars <- c("L", "U", "k", "x0")
+pars <- c("L", "k", "x0")
 
-fit = stan(here("code", "stan", "p0_race_logistic_eda.stan"),
+fit = stan(here("code", "stan", "p0_group_logistic_eda.stan"),
            pars  = pars,
            include = TRUE,
            iter = niter,
@@ -240,10 +242,13 @@ pars.fit <- lapply(as.character(pars), function(x) {
     return(out)
 })
 
-df.pars.eda <- do.call("rbind", pars.fit)
+df.pars.race.eda <- do.call("rbind", pars.fit)
 
-saveRDS(df.pars.eda,
+saveRDS(df.pars.race.eda,
         here("data", "df_p0_race_eda.rda"))
+
+# df.pars.race.eda <- readRDS(here("data", "df_p0_race_eda.rda"))
+        
 
 
 ## BUILD MODEL FROM 
@@ -252,7 +257,7 @@ saveRDS(df.pars.eda,
 options(mc.cores = parallel::detectCores()-1)
 
 ## STAN fit
-pars <- c("p")
+pars <- c("L", "k", "x0")
 
 fit = stan(here("code", "stan", "p0_race_logistic.stan"),
            pars  = pars,
@@ -290,7 +295,282 @@ df.p <- as.data.frame.table(p.ci) %>%
 saveRDS(df.p,
         here("data", "df_p0_race_fit.rda"))
 
-# df.p <- readRDS(here("data", "df_p0_race_fit.rda"))
+# df.pars.race.eda <- readRDS(here("data", "df_p0_race_fit.rda"))
+
+
+## BUILD MODEL FROM 
+## DISCUSSION WITH MONICA
+## -> RW2 and RW1
+
+options(mc.cores = parallel::detectCores()-1)
+
+## STAN fit
+pars <- c("L", "k", "x0", "p")
+
+fit = stan(here("code", "stan", "p0_group_logistic.stan"),
+           pars  = pars,
+           include = TRUE,
+           iter = niter,
+           warmup = nwarmup,
+           chains = nchains,
+           data = stan_data
+)
+
+## Store p
+p.fit <- array(as.matrix(fit, "p"),
+               c(nsim, n.races, n.ages, n.years),
+               dimnames = list(1:nsim,
+                               races,
+                               ages,
+                               years
+               ))
+## Quantile of p
+p.ci <- apply(p.fit, c(2:4), quantile, probs = c(0.975, 0.5, 0.025))
+
+df.p <- as.data.frame.table(p.ci) %>%
+    rename("race" = Var2,
+           "age" = Var3,
+           "year" = Var4) %>%
+    mutate(Var1 = case_when( 
+        Var1 == "97.5%" ~ "upper95",
+        Var1 == "50%" ~ "median",
+        Var1 == "2.5%" ~ "lower95")) |> 
+    pivot_wider(names_from = Var1, values_from = Freq) %>% 
+    mutate(age = as.character(age) %>% as.numeric,
+           year = as.character(year) %>% as.numeric)
+
+## Store estimates
+saveRDS(df.p,
+        here("data", "df_p0_race_rw_fit.rda"))
+
+# df.pars.race.fit <- readRDS(here("data", "df_p0_race_fit.rda"))
+
+## Store and tidy logistic estimates 
+pars <- pars[pars != "p"]
+pars.fit <- lapply(as.character(pars), function(x) {
+    
+    ## Store in arrays
+    par.draw <- array(as.matrix(fit, x),
+                 c(nsim, n.years, n.races),
+                 dimnames = list(1:nsim,
+                                 years,
+                                 races))
+    ## Get CI
+    par.ci <- apply(par.draw, 
+                 c(2,3), 
+                 quantile, probs = c(0.975, 0.5, 0.025))
+    ## Store in df
+    out <- as.data.frame.table(par.ci) %>%
+        rename("year" = Var2,
+               "race" = Var3) %>%
+        mutate(Var1 = case_when( 
+            Var1 == "97.5%" ~ "upper95",
+            Var1 == "50%" ~ "median",
+            Var1 == "2.5%" ~ "lower95")) |> 
+        pivot_wider(names_from = Var1, values_from = Freq) %>% 
+        mutate(year = as.character(year) %>% as.numeric,
+               par = x)
+    
+    return(out)
+})
+
+df.pars.race.fit <- do.call("rbind", pars.fit)
+
+saveRDS(df.pars.race.fit,
+        here("data", "df_p0_race_rw_pars.rda"))
+
+# df.pars.race.eda <- readRDS(here("data", "df_p0_race_eda.rda"))
+        
+
+
+
+
+## STAN section state level -----------------------------------------------------
+
+ages <- unique(df$age)
+n.ages <- length(ages)
+years <- unique(df$year)
+n.years <- length(years)
+states <-  unique(df$name)
+n.states <- length(states)
+
+## STAN data
+df.stan <- df |>
+    ## create factors to keep
+    ## all combinations with
+    ## group_by
+    mutate(
+        age = factor(age,
+                     levels = ages,
+                     labels = ages),
+        year = factor(year,
+                      levels = years,
+                      labels = years),
+        name = factor(name,
+                      levels = states,
+                      labels = states)
+    ) |> 
+    group_by(age, year, name,
+             .drop = FALSE) |> 
+    summarise(across(y:n, sum)) |> 
+    ## Arrange for STAN
+    arrange(name, year, age) 
+
+## EXPLORATORY WORK BY SETTING
+## PARS ~ N(0,1)
+
+stan_data <- list(# Dimensions
+    N = dim(df.stan)[1],
+    Y_obs = n.years,
+    A = n.ages,
+    age = ages,
+    G = n.states,
+    # Careful !!
+    # Structured as vector but order super important !!!
+    # Needs to coincide with logmx_ord in STAN (multiple to_vector() )
+    y = round(df.stan$y, 0), 
+    n = round(df.stan$n, 0)
+)
+
+## STAN set-up
+niter = 2000
+nwarmup = niter/2
+nchains = 4
+nsim = (niter-nwarmup)*nchains
+
+options(mc.cores = parallel::detectCores()-1)
+
+## STAN fit
+pars <- c("L", "k", "x0")
+
+fit = stan(here("code", "stan", "p0_group_logistic_eda.stan"),
+           pars  = pars,
+           include = TRUE,
+           iter = niter,
+           warmup = nwarmup,
+           chains = 4,
+           data = stan_data
+)
+
+## Store ad tidy estimates 
+pars.fit <- lapply(as.character(pars), function(x) {
+    
+    ## Store in arrays
+    par.draw <- array(as.matrix(fit, x),
+                      c(nsim, n.years, n.states),
+                      dimnames = list(1:nsim,
+                                      years,
+                                      states))
+    ## Get CI
+    par.ci <- apply(par.draw, 
+                    c(2,3), 
+                    quantile, probs = c(0.975, 0.5, 0.025))
+    ## Store in df
+    out <- as.data.frame.table(par.ci) %>%
+        rename("year" = Var2,
+               "state" = Var3) %>%
+        mutate(Var1 = case_when( 
+            Var1 == "97.5%" ~ "upper95",
+            Var1 == "50%" ~ "median",
+            Var1 == "2.5%" ~ "lower95")) |> 
+        pivot_wider(names_from = Var1, values_from = Freq) %>% 
+        mutate(year = as.character(year) %>% as.numeric,
+               par = x)
+    
+    return(out)
+})
+
+df.pars.fit <- do.call("rbind", pars.fit)
+
+saveRDS(df.pars.fit,
+        here("data", "df_p0_state_eda.rda"))
+
+# df.pars.states.eda <- readRDS(here("data", "df_p0_state_eda.rda"))
+
+
+## BUILD MODEL FROM 
+## EXPLORATORY WORK
+options(mc.cores = parallel::detectCores()-1)
+
+## STAN fit
+pars <- c("L", "k", "x0", "p")
+
+fit = stan(here("code", "stan", "p0_group_logistic.stan"),
+           pars  = pars,
+           include = TRUE,
+           iter = niter,
+           warmup = nwarmup,
+           chains = nchains,
+           data = stan_data
+)
+
+## Store p 
+p.fit <- array(as.matrix(fit, "p"),
+               c(nsim, n.states, n.ages, n.years),
+               dimnames = list(1:nsim,
+                               states,
+                               ages,
+                               years
+               ))
+## Quantile of p
+p.ci <- apply(p.fit, c(2:4), quantile, probs = c(0.975, 0.5, 0.025))
+
+df.p <- as.data.frame.table(p.ci) %>%
+    rename("state" = Var2,
+           "age" = Var3,
+           "year" = Var4) %>%
+    mutate(Var1 = case_when( 
+        Var1 == "97.5%" ~ "upper95",
+        Var1 == "50%" ~ "median",
+        Var1 == "2.5%" ~ "lower95")) |> 
+    pivot_wider(names_from = Var1, values_from = Freq) %>% 
+    mutate(age = as.character(age) %>% as.numeric,
+           year = as.character(year) %>% as.numeric)
+
+## Store estimates
+saveRDS(df.p,
+        here("data", "df_p0_state_rw_fit.rda"))
+
+# df.p <- readRDS(here("data", "df_p0_state_rw_fit.rda"))
+
+
+## Store and tidy logistic estimates 
+pars <- pars[pars != "p"]
+pars.fit <- lapply(as.character(pars), function(x) {
+    
+    ## Store in arrays
+    par.draw <- array(as.matrix(fit, x),
+                      c(nsim, n.years, n.states),
+                      dimnames = list(1:nsim,
+                                      years,
+                                      states))
+    ## Get CI
+    par.ci <- apply(par.draw, 
+                    c(2,3), 
+                    quantile, probs = c(0.975, 0.5, 0.025))
+    ## Store in df
+    out <- as.data.frame.table(par.ci) %>%
+        rename("year" = Var2,
+               "state" = Var3) %>%
+        mutate(Var1 = case_when( 
+            Var1 == "97.5%" ~ "upper95",
+            Var1 == "50%" ~ "median",
+            Var1 == "2.5%" ~ "lower95")) |> 
+        pivot_wider(names_from = Var1, values_from = Freq) %>% 
+        mutate(year = as.character(year) %>% as.numeric,
+               par = x)
+    
+    return(out)
+})
+
+df.pars.state.fit <- do.call("rbind", pars.fit)
+
+saveRDS(df.pars.state.fit,
+        here("data", "df_p0_state_rw_pars.rda"))
+
+# df.pars.state.fit <- readRDS(here("data", "df_p0_state_rw_pars.rda"))
+
+
 
 
 ## Visu ------------------------------------------------------------------------
@@ -335,12 +615,13 @@ df.p |>
 ## BY RACE
 
 ## EDA setting logistic par priors to N(0,1)
-df.pars.eda |> 
+df.pars.race.fit |> 
     filter(race != "NH-Other") |> 
     ggplot(aes(x = year, y = median, group = race, col = race)) +
     facet_wrap(~ par,
                scales = "free_y") +
     geom_pointrange(aes(ymin = lower95, ymax = upper95)) +
+    geom_line() +
     theme_bw()
 ## Temporal trend in x0: race around a global mean, mean ~ RW
 ## Might assume that U is 1
@@ -350,6 +631,7 @@ df.pars.eda |>
 ## Plot of fit vs data points
 ## All races and years
 df.p |> 
+    filter(race != "NH-Other") |> 
     left_join(
         df |> 
             group_by(age, year, race_eth) |> 
@@ -359,11 +641,13 @@ df.p |>
             dplyr::select(age, year, race = race_eth, p),
         by = c("age", "year", "race")
     ) |> 
-    ggplot(aes(x = age, group = race, col = race)) +
+    ggplot(aes(x = age, group = race, col = race, fill = race)) +
     facet_wrap(~ year,
                scales = "free_y") +
     geom_point(aes(y = p)) +
     geom_line(aes(y = median), linewidth = 1) +
+    geom_ribbon(aes(ymin = lower95, ymax = upper95),
+                alpha = .3, col = NA) +
     theme_bw()
 
 ## NH-Black over years
@@ -387,3 +671,54 @@ df.p |>
     theme_bw()
 
 
+## BY STATES
+# EDA setting logistic par priors to N(0,1)
+ex.states <- sample(unique(df.pars.states.eda$state), 10)
+df.pars.states.eda |> 
+    filter(state %in% ex.states) |> 
+    ggplot(aes(x = year, y = median, group = state, col = state)) +
+    facet_wrap(~ par,
+               scales = "free_y") +
+    #geom_line() +
+    geom_pointrange(aes(ymin = lower95, ymax = upper95)) +
+    theme_bw() +
+    theme(legend.position = "none")
+
+## Look at fit for each state
+df.p.states <- df.p |> 
+    left_join(
+        df |> 
+            group_by(age, year, name) |> 
+            summarise(across(y:n, sum),
+                      p = y/n) |> 
+            ungroup() |> 
+            dplyr::select(age, year, state = name, p),
+        by = c("age", "year", "state")
+    )
+
+fig.fit.state <- lapply(unique(df$name), function(x) {
+    
+    
+    fig.out <- df.p.states |> 
+        filter(state == x) |> 
+        ggplot(aes(x = age)) +
+        facet_wrap(~ year,
+                   scales = "free_y") +
+        geom_point(aes(y = p)) +
+        geom_line(aes(y = median), linewidth = 1) +
+        geom_ribbon(aes(ymin = lower95, ymax = upper95),
+                    alpha = .3, col = NA) +
+        theme_bw() +
+        labs(title = x)
+    
+    return(fig.out)
+})
+
+## Save list of plots
+ggsave(
+    filename = here("plots", "p0_state_rw_fit.pdf"), 
+    plot = gridExtra::marrangeGrob(fig.fit.state, nrow=1, ncol=1), 
+    width = 15, height = 9
+)
+
+    

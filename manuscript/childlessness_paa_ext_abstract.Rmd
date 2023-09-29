@@ -1,0 +1,296 @@
+---
+title: "Modeling age patterns of childlessness in small areas: a semi-parametric approach"
+author:
+  - name: Benjamin-Samuel Schluter
+    affiliation: A
+    footnote:
+      - corresp
+  - name: Monica Alexander
+    affiliation: B
+address:
+  - code: A
+    address: Department of Statistical Sciences, University of Toronto, Canada
+  - code: B
+    address: Departments of Statistical Sciences and Sociology, University of Toronto, Canada
+footnote:
+  - code: corresp
+    text: "benjamin.schluter@utoronto.ca."
+bibliography: refs.bib
+csl: demographic-research.csl
+link-citations: TRUE
+output:
+  bookdown::pdf_document2:
+    toc: FALSE
+    keep_tex: TRUE
+    template: generic_article_template.tex
+    #md_extensions: "-autolink_bare_uris"
+    number_sections: TRUE
+    citation_package: default # Can also be "natbib"
+geometry: "margin=25mm"
+papersize: letter
+fontsize: 11pt
+endfloat: FALSE # Set to TRUE to turn on latex endfloat package to place figures and tables at end of document
+numberlines: FALSE
+authblk: TRUE # FALSE = author affiliations in footnotes; TRUE = author affiliations in a block below author names
+footnotehyper: FALSE # TRUE will give you enhanced table footnote capabilities. Set to FALSE to be able to use French blocks. Needed due to what appears to be a latex bug.
+urlcolor: blue
+linkcolor: blue
+citecolor: blue
+graphics: TRUE # Needed to be able to include images
+tables: TRUE # Needed to be able to include tables
+always_allow_html: true
+abstract: "Childlessness is a demographic phenomenon that has gained attention during the last decades. It has been shown to have strong consequences at both the individual and population level. Despite the increasing attention received by childlessness, no modeling framework has been proposed to estimate the age-specific share of individuals not having a child. We propose a model framework to estimate age-specific proportions of individuals being childless at a subnational level. The model is semi-parametric by allowing some deviations from an expected level parametrized by a logistic function. The deviations are modeled with P-splines. The model is estimated in a Bayesian estimation framework allowing temporal smooting and pooling of the parameters. We apply the model to estimate the proportions of childless women by bridged race/ethnicity or state in the U.S. The preliminary results are promising and the model could easily be expended to model multiple parities and perform projection of childlessness."
+---
+
+```{r chunk-options, echo=FALSE}
+
+## Global chunk options --------------------------------------------------------
+
+knitr::opts_chunk$set(echo = FALSE, fig.pos = "H", out.extra = "")
+
+```
+
+
+```{r pkg-data, warning=FALSE, message=FALSE}
+
+## Load packages ---------------------------------------------------------------
+
+## Install/load packages
+packages <- c("tidyverse", "ggplot2", "here", "viridis")
+for(p in packages){
+    if(!require(p,character.only = TRUE)) install.packages(p)
+    library(p,character.only = TRUE)
+}
+
+
+
+## Functions -------------------------------------------------------------------
+
+## Script containing the functions computing
+## the main elements required to run the kin dynamics
+
+
+
+## Load data -------------------------------------------------------------------
+
+df <- readRDS(
+  here("data", "df_chldness.rda")
+) |> 
+  filter(
+    ## Focus on 3 main bridged race_eth
+    race_eth != "NH-Other"
+  )
+
+df.p.log <- readRDS(
+  here("data", "df_p0_race_logistic_fit.rda")
+  )
+
+df.p.full <- readRDS(
+  here("data", "df_p0_race_logistic_splines_fit.rda")
+  )
+
+
+
+## Key dimensions in code ------------------------------------------------------
+
+ages <- unique(df$age)
+n.ages <- length(ages)
+years <- unique(df$year)
+n.years <- length(years)
+states <-  unique(df$name)
+n.states <- length(states)
+races <- unique(df$race_eth)
+n.races <- length(races)
+
+
+```
+
+```{r plot-theme}
+
+## plot theme
+theme_plot <- function() {
+  
+  theme_bw() +
+    theme(
+      ## legend
+      legend.position = "top",
+      legend.title = element_text(size = 8),
+      legend.text = element_text(size = 7),
+      
+      ## axes
+      axis.title = element_text(size = 10),
+      axis.text = element_text(size = 9),
+      
+      ## facets
+      strip.background=element_blank(),
+      strip.text = element_text(face = "bold", size = 8),
+      panel.border = element_blank(),
+      axis.line = element_line(color = 'black')
+      )
+}
+
+```
+
+
+# Introduction
+
+Childlessness is a demographic phenomenon that has gained attention in the Global North. Early research was based on longitudinal surveys collected in the United States [@thomson1997couple]. Following the creation of large-scale panel data, childlessness also became well studied in European countries [@kreyenfeld2017analyzing]. According to @livingston2015childlessness, the share of childless American women aged 40 to 44 started at 10% in 1976, reached a peak at 20% in 2005, and fall hereafter to 15% in 2014. In line with previous results, @dye2010fertility showed that among American women aged 45 in 2006, one fifth were childless. While prior studies focused on female childlessness, recent years also brought research on male childlessness [@gray2013childbearing; @nisen2014age].
+
+Childlessness has strong consequences at the individual level -- it has been shown to influence old-age well-being [@dykstra2007pathways], and health [@kendig2007health] -- but also at the population level by impacting labor market outcomes [@correll2007getting]. This motivated research trying to identify its causes and determinants [@kirmeyer2011childbearing; @mynarska2015diverse; @gemmill2019some]. 
+
+Despite the increasing attention received by childlessness, no modeling framework has been proposed to estimate the age-specific share of individuals not having a child. A statistical model is particularly relevant when one wants to obtain age-specific childlessness proportions across small areas. Indeed, small population sizes lead to high stochasticity in the raw data, rendering the underlying trend unclear. For example, it has been shown that the proportion of women childless varies across racial/ethnic groups [@lundquist2009race; @livingston2015childlessness] but not much is known about the patterns of subpopulations defined by different combination of individual characteristics such as the state of residence, race/ethnicity, and education level. 
+
+In this paper we propose a model framework to estimate age-specific proportions of individuals being childless at a subnational level. The model is semi-parametric in the sense that we allow some deviations from an expected level parametrized by a logistic function. The logistic function estimates the entire age schedule proportions of childless individuals with three parameters that are smoothed over time. This semi-parametric framework is robust to zero counts while being flexible. We show preliminary results as applied to race- or state-specific childlessness proportion in the U.S. Future work will expend the model to allow estimating population subgroups defined by a combination of factors (i.e. state of residence and race/ethnicity).
+
+
+
+# Modeling Framework
+
+Define $y_{x, g, t}$ to be the number of childless persons of age $x$ belonging to subpopulation group $g$ at time $t$. Define $n_{x, g, t}$ to be the subpopulation group $g$ aged $x$ at time $t$. We assume the counts of parent to be Binomially distributed as follows,
+
+$$y_{x, g, t} \sim \text{Binomial}(n_{x, g, t}, p_{x, g, t}).$$ 
+Our aim is to estimate the proportion being childless $p_{x, g, t}$. We model these proportions on the logit scale as follows,
+
+$$logit(p_{x, g, t}) = logit(1 - f(U_{g, t}, k_{g, t}, M_{g, t})) + \sum_k B_{x,k} \alpha_{k,g,t}$$ 
+where
+
+$$f(U_{g, t}, k_{g, t}, M_{g, t}) =  \frac{U_{g,t}}{1+e^{-k_{g,t}(x-M_{g,t})}}$$ 
+
+is the logistic function with $M$ the function's midpoint, $U$ the supremum of the values of the function, and $k$ the steepness of the curve. Deviations from the parametric function are modeled with P-splines [@eilers1996flexible]. More precisely, $\boldsymbol{B}$ is the cubic basis matrix of dimension ($A \times K$) where $A=44$ the upper age bound, and $K=6$ the number of knots; $\boldsymbol{\alpha_{g,t}}$ is a cubic-splines parameter vector of dimension ($K \times 1$) estimated in the model. We impose smoothness on the deviations by using a Random Walk 1 prior on $\boldsymbol{\alpha_{g,t}}$,
+
+$$\alpha_{k,g,t} \sim \text{Normal}(\alpha_{k-1,g,t}, \sigma_{\alpha, t}^2)$$
+where the variance parameter $\sigma_{\alpha,t}^2$ is shared across all subpopulation groups in each year. 
+
+Following exploratory data analyses, we smooth the logistic parameters by assuming that
+
+$$U_{g,t} \sim \text{Normal}(U_{g,t-1}, \sigma_U^2)$$
+$$k_{g,t} \sim \text{Normal}(k_{g,t-1}, \sigma_k^2)$$
+and 
+
+$$M_{g,t} \sim \text{Normal}(2\cdot M_{g,t-1} - M_{g,t-2}, \sigma_M^2).$$
+The variance parameters are shared across all subpopulation groups to enforce some pooling of information. All variance parameters take weekly informative priors.
+
+Our set-up resembles the TOPALS [@de2012smoothing; @gonzaga2016estimating] and P-TOPALS [@dyrting2020smoothing] models except that the expected level is estimated.  
+
+
+
+# Preliminary application to childlessness by race/ethnicity or State
+
+
+## Data
+
+We test our model on the proportion being childless by race/ethnicity or State using Current Population Surveys (CPS) data and their Fertility and Marriage June supplement. The survey has been conducted every two year\footnote{Except for the year 1996 which was collected in 1995 instead.} and we consider the period 1990-2020. We define childlessness with the variable "frever" which indicates the number of live birth a women ever had. A women of a given age was defined childless when "frever" was equal to zero. Women considered are aged 15 to 44 years old. The variables "race" and "hispan" were combined to construct the bridged race categories: "non-Hispanic Black", "non-Hispanic White", and "Hispanic". We further use the variable "statefip" to define the State in which an individual is residing. Finally, the obtained counts were accounting for the survey weights. 
+
+
+## Preliminary results
+
+Figure \@ref(fig:race-fit) shows the percentages of women childless (y-axis) over the ages 15 to 44 years old (x-axis) for the three racial/ethnic groups considered (horizontal panels). In order to fully illustrate the model, the vertical panels show the fit of two different models. Top panels reflect the fit with only a logistic function. Bottom panels present the fit allowing deviations from the logistic function with P-splines. The points and lines reflect the raw data and the model fit, respectively. From the Figure, the logistic function is generally modeling the proportion of childless women accurately but lacks some flexibility at the youngest and oldest ages (especially visible for non-Hispanic Black and Hispanic populations). Looking at the bottom panel, adding the P-splines improve the fit at these two extremes. As expected, the wider the 95% credible interval, the smaller the racial/ethnic group considered.
+
+```{r data-race, warning=FALSE, message=FALSE}
+
+## Childless by race_eth
+df.stan <- df |>
+  ## create factors to keep
+  ## all combinations with
+  ## group_by
+  mutate(
+    age = factor(age,
+                 levels = ages,
+                 labels = ages),
+    year = factor(year,
+                  levels = years,
+                  labels = years),
+    race_eth = factor(race_eth, 
+                      levels = races,
+                      labels = races)
+  ) |> 
+  group_by(
+    age, year, race_eth,
+    .drop = FALSE
+  ) |> 
+  summarise(
+    across(y:n, sum)
+  ) |> 
+  ungroup() |> 
+  ## Arrange for STAN
+  arrange(race_eth, year, age)  |> 
+  mutate(
+    p = y/n
+  )
+
+```
+
+
+```{r race-fit, warning=FALSE, fig.cap="Proportion of women childless by race/ethnicity with and without deviations from a logistic function during the year 2020"}
+
+## Plot logistic vs full
+bind_rows(
+  df.p.log |> 
+    mutate(
+      model = "Logistic"
+    ),
+  df.p.full |> 
+    mutate(
+      model = "Logistic + P-splines"
+    )
+) |> 
+  left_join(
+    df.stan |>
+    mutate(
+        ## Compatibility for left_join
+        age = as.character(age) |> as.numeric(),
+        year = as.character(year) |> as.numeric(),
+        ## Compute raw p
+        p = y/n
+    ),
+    by = c("race_eth", "age", "year")
+  )|> 
+    filter(
+      year == 2020
+      ) |> 
+    ggplot(aes(x = age, col = race_eth, fill = race_eth)) +
+    facet_grid(model ~ race_eth) +
+    geom_line(aes(y = median)) +
+    geom_ribbon(aes(ymin = lower95, ymax = upper95), col = NA, alpha = .6) +
+    geom_point(aes(y = p), size = 1) +
+    theme_plot() +
+    annotate("segment", x=-Inf, xend=Inf, y=-Inf, yend=-Inf) +
+    labs(y = "Percentage childless",
+         x = "Age",
+         col = "Race/ethnicity",
+         fill = "Race/ethnicity")
+
+
+```
+
+
+
+Figure 2 shows the model estimated on States X, Y, and Z. The raw data is subject to higher stochasticity. DESCRIPTION OF FIT TO BE ADDED HERE.
+
+
+
+```{r state-fit, warning=FALSE, fig.cap="Proportion of women childless for state X, Y, Z during the years T and T+10"}
+
+ggplot() +
+    theme_plot() +
+    labs(y = "Percentage childless",
+         x = "Age")
+
+
+```
+
+
+
+# Next Steps & Extensions
+
+In this abstract we proposed a modeling framework to estimate age-specific proportions of women being childless at a subnational level. We propose a semi-parametric model consisting of a logistic function plus some deviations modeled with P-splines. Preliminary results shown for childlessness by States or racial/ethnic groups are promising. 
+
+Future work will model childlessness by State and racial/ethnic group. This modeling framework can also be used to project childlessness proportions of different subpopulation groups in the future. Finally, this modeling framework could be expended to estimate simultaneously different parity (ie. childless, one child, ...) by using a Multinomial distribution in place of the Binomial distribution.
+
+
+\newpage
+
+# References {.unnumbered}
+
+::: {#refs}
+:::

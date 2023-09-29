@@ -4,6 +4,14 @@ rm(list=ls())
 library(tidyverse)
 library(here)
 library(rstan)
+library(splines)
+
+
+
+## Load data -------------------------------------------------------------------
+
+## Childless by race and state
+df <- readRDS(here("data", "df_chldness.rda"))
 
 
 
@@ -73,7 +81,59 @@ compute_logistic_df <- function(L, k, x0) {
     
 
 
+## Assess impact of spline around logistic function ----------------------------
 
+## Check rows where n=0
+
+df |> 
+    filter(
+        n < 1
+        )
+
+## Logistic function
+compute_logistic <- function(L, k, x0) {
+    
+    p = L + (1 - L) / (1 + exp(k * (ages - x0)))
+    
+    return(p)
+}
+
+## Logistic with values
+theta <- compute_logistic(0.175, 0.4, 23)
+
+## Logistic with splines
+position.knots <- seq(20, 40, 10)
+B   <- bs(ages, knots=position.knots, degree=1)
+alpha <- c(1,1,-1.5,1)
+
+omega <- qlogis(theta) + B %*% alpha
+
+p <- 1 / (1 + exp(-omega))
+
+df <- tibble(
+    fit = c(theta, p),
+    type = c(rep("logistic", length(ages)), 
+             rep("logistic+splines", length(ages))),
+    age = rep(ages, 2)
+)
+
+## Visu
+df |> 
+    ggplot(aes(x = age, y = fit, col = type, group = type)) +
+    geom_line() +
+    geom_vline(xintercept = position.knots,
+               linetype = "dashed") +
+    theme_bw()
+
+## Visu splines
+df.splines <- tibble(
+    splines = B %*% alpha,
+    age = ages
+)
+df.splines |> 
+    ggplot(aes(x = age, y = splines)) +
+    geom_line() +
+    theme_bw()
 
 ## EDA -------------------------------------------------------------------------
 

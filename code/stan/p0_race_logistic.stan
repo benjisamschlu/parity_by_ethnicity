@@ -3,7 +3,7 @@ data {
   int<lower=0> A;  // nber of age groups
   int<lower=0> Y_obs;  // nber of observed years
   vector<lower=0>[A] age;  // ages
-  int<lower=0> R; // nber of races
+  int<lower=0> R; // nber of subpopulation (races or states)
   int<lower=0> n[N];  // women 
   int<lower=0> y[N]; // women childless
 }
