@@ -205,49 +205,56 @@ nsim = (niter-nwarmup)*nchains
 options(mc.cores = parallel::detectCores()-1)
 
 ## STAN fit
-pars <- c("p")
+pars <- c("p", "x0", "k", "U")
 
 ## Run on server
-# 
-# fit = stan(here("code", "stan", "p0_logistic_splines.stan"),
-#            pars  = pars,
-#            include = TRUE,
-#            iter = niter,
-#            warmup = nwarmup,
-#            chains = nchains,
-#            data = stan_data
-# )
-# 
-# ## Store p 
-# p.fit <- array(as.matrix(fit, "p"),
-#                c(nsim, n.races, n.ages, n.years),
-#                dimnames = list(1:nsim,
-#                                races,
-#                                ages,
-#                                years
-#                ))
-# ## Quantile of p
-# p.ci <- apply(p.fit, c(2:4), quantile, probs = c(0.975, 0.5, 0.025))
-# 
-# df.p <- as.data.frame.table(p.ci) %>%
-#     rename("race_eth" = Var2,
-#            "age" = Var3,
-#            "year" = Var4) %>%
-#     mutate(Var1 = case_when( 
-#         Var1 == "97.5%" ~ "upper95",
-#         Var1 == "50%" ~ "median",
-#         Var1 == "2.5%" ~ "lower95")) |> 
-#     pivot_wider(names_from = Var1, values_from = Freq) %>% 
-#     mutate(age = as.character(age) %>% as.numeric,
-#            year = as.character(year) %>% as.numeric)
+
+fit = stan(here("code", "stan", "p0_logistic_splines.stan"),
+           pars  = pars,
+           include = TRUE,
+           iter = niter,
+           warmup = nwarmup,
+           chains = nchains,
+           data = stan_data
+)
+# saveRDS(fit,
+#         here("data", "p0_race_logistic_splines_stan.rda"))
+
+## Store ad tidy estimates 
+pars.fit <- lapply(pars[pars != "p"], function(x) {
+    
+    ## Store in arrays
+    par.draw <- array(as.matrix(fit, x),
+                      c(nsim, n.years, n.races),
+                      dimnames = list(1:nsim,
+                                      years,
+                                      races
+                      ))
+    ## Quantile of p
+    p.ci <- apply(par.draw, c(2:3), 
+                  quantile, probs = c(0.975, 0.5, 0.025))
+    
+    ## Store in df
+    out <- as.data.frame.table(p.ci) %>%
+        rename("year" = Var2,
+               "race_eth" = Var3) %>%
+        mutate(Var1 = case_when(
+            Var1 == "97.5%" ~ "upper95",
+            Var1 == "50%" ~ "median",
+            Var1 == "2.5%" ~ "lower95")) |>
+        pivot_wider(names_from = Var1, values_from = Freq) %>%
+        mutate(year = as.character(year) %>% as.numeric,
+               par = x)
+    
+    return(out)
+})
+
+df.pars <- do.call("rbind", pars.fit)
 
 ## Store estimates
-# saveRDS(df.p,
-#         here("data", "df_p0_race_logistic_splines_fit.rda"))
-
-df.p <- readRDS(
-    here("data", "df_p0_race_logistic_splines_fit.rda")
-)
+saveRDS(df.pars,
+        here("data", "df_p0_race_logistic_splines_pars.rda")
+        )
 
 
 ## Vizu fit --------------------------------------------------------------------
@@ -289,6 +296,19 @@ df.p |>
          x = "Year",
          col = "Race/ethnicity",
          fill = "Race/ethnicity")
+
+## Temporal variation in pars
+df.pars |> 
+    ggplot(aes(x = year, y = median,
+               ymin = lower95, ymax = upper95,
+               group = race_eth, 
+               col = race_eth,
+               fill = race_eth)) +
+    facet_wrap(~par,
+               scales = "free_y") +
+    geom_line() +
+    #geom_ribbon(alpha = .3) +
+    theme_bw()
 
 
 

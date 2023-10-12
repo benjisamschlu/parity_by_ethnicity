@@ -131,5 +131,49 @@ df.p <- as.data.frame.table(p.ci) %>%
 saveRDS(df.p,
         here("data", "df_p0_state_logistic_splines_fit.rda"))
 
+## Load estimates
+df.p <- readRDS(
+    here("data", "df_p0_state_logistic_splines_fit.rda")
+)
 
+
+## Visualize outputs -----------------------------------------------------------
+
+## Join fit and data
+df.p.states <- 
+    df.p |> 
+    left_join(
+        df.stan |> 
+            mutate(
+                p = y/n,
+                age = as.character(age) |> as.numeric(),
+                year = as.character(year) |> as.numeric()
+            ) |> 
+            dplyr::select(age, year, name, p),
+        by = c("age", "year", "name")
+    )
+
+## Store state plots in list
+fig.fit.state <- lapply(states, function(x) {
+    
+    
+    fig.out <- df.p.states |> 
+        filter(name == x) |> 
+        ggplot(aes(x = age)) +
+        facet_wrap(~ year,
+                   scales = "free_y") +
+        geom_point(aes(y = p)) +
+        geom_line(aes(y = median), linewidth = 1) +
+        geom_ribbon(aes(ymin = lower95, ymax = upper95),
+                    alpha = .3, col = NA) +
+        theme_bw() +
+        labs(title = x)
+})
+
+## Save list of plots
+ggsave(
+    filename = here("plots", "p0_state_logistic_Cspline_fit.pdf"), 
+    plot = gridExtra::marrangeGrob(fig.fit.state, nrow=1, ncol=1), 
+    width = 15, height = 9
+)
 
