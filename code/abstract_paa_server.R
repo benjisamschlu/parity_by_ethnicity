@@ -16,7 +16,9 @@ library(splines)
 df <- readRDS(here("data", "df_chldness.rda")) |> 
     filter(
         ## Focus on 3 main bridged race_eth
-        race_eth != "NH-Other"
+        race_eth != "NH-Other",
+        # Year > 2000
+        year >= 2000
     )
 
 
@@ -38,9 +40,6 @@ n.races <- length(races)
 
 ## Childless by race_eth
 df.stan <- df |>
-    ## create factors to keep
-    ## all combinations with
-    ## group_by
     mutate(
         age = factor(age,
                      levels = ages,
@@ -64,8 +63,9 @@ df.stan <- df |>
     arrange(name, year, age) 
 
 ## Create linear splines basis
-B <- bs(ages, knots=seq(20, 40, 10), degree=3)
+B <- bs(ages, knots=30, degree=3)
 nalpha = ncol(B)
+# matplot(15:44, B, type="l")
 
 ## STAN data
 stan_data <- list(
@@ -95,7 +95,7 @@ options(mc.cores = parallel::detectCores()-1)
 ## STAN fit
 pars <- c("p")
 
-fit = stan(here("code", "stan", "p0_logistic_splines.stan"),
+fit = stan(here("code", "stan", "p0_logisticrw2_splines.stan"),
            pars  = pars,
            include = TRUE,
            iter = niter,
@@ -129,12 +129,12 @@ df.p <- as.data.frame.table(p.ci) %>%
 
 ## Store estimates
 saveRDS(df.p,
-        here("data", "df_p0_state_logistic_splines_fit.rda"))
+        here("data", "df_p0_state_logisticrw2_splines_fit.rda"))
 
 ## Load estimates
-df.p <- readRDS(
-    here("data", "df_p0_state_logistic_splines_fit.rda")
-)
+# df.p <- readRDS(
+#     here("data", "df_p0_state_logistic_splines_fit.rda")
+# )
 
 
 ## Visualize outputs -----------------------------------------------------------
@@ -172,7 +172,7 @@ fig.fit.state <- lapply(states, function(x) {
 
 ## Save list of plots
 ggsave(
-    filename = here("plots", "p0_state_logistic_Cspline_fit.pdf"), 
+    filename = here("plots", "p0_state_logisticrw2_Cspline_fit.pdf"), 
     plot = gridExtra::marrangeGrob(fig.fit.state, nrow=1, ncol=1), 
     width = 15, height = 9
 )
