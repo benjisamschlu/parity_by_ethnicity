@@ -1,22 +1,63 @@
 
-rm(list=ls())
+##==============================================================================
+##
+##  Project title: Modeling of childlessness
+##
+##  This code estimate proportion of parent (1-childless) with a Janoshek
+##  curve.
+##
+## 
+##  Author: Benjamin Schlüter
+##  Date: December 2023
+##==============================================================================
+##
+##  Notes
+## ------
+## 1. Only consider years from 2008 as previous years might over-estimate
+##    childlessness (see US Census Bureau report)
+## 
+##==============================================================================
 
-library(tidyverse)
-library(here)
-library(rstan)
-library(splines)
+
+
+## ==== LOAD PACKAGES ==========================================================
+
+# Install/load packages
+packages <- c("tidyverse", "here", "rstan")
+for(p in packages){
+    if(!require(p,character.only = TRUE)) install.packages(p)
+    library(p,character.only = TRUE)
+}
 
 
 
-## === DATA ====================================================================
 
-## Careful: no observation for all years (~ every 2 y)
+## ==== LOAD DATA ==============================================================
 
-## Childless by race and state
-df <- readRDS(here("data", "df_chldness.rda")) |> 
+# Childless corrected with hh info
+# for the years 2008 and 2010
+df_cor <- readRDS(
+    here(
+        "data", 
+        "df_childness_cor_2008_10.rds"
+    )
+) 
+# Childless by race and state
+df <- readRDS(
+    here(
+        "data", 
+        "df_childness.rds"
+    )
+) |> 
     filter(
-        year >= 2000
-        ) 
+        # Focus on years using coresident info
+        year >= 2012
+    )
+
+# Bind corrected years with the rest
+df <- bind_rows(
+    df_cor, df
+)
 
 # Key dimensions in code 
 ages <- unique(df$age)
@@ -26,7 +67,7 @@ n.years <- length(years)
 
 
 
-## === INITIAL PAR VALUES ======================================================
+## ==== INITIAL PAR VALUES =====================================================
 
 # Data of childlessness at US level
 df.us <- df |>
@@ -34,16 +75,14 @@ df.us <- df |>
     summarise(
         .by = c(year, age),
         
-        across(y:n, sum)
+        across(y:n, sum),
+        # Perspective of prop parent instead of childless (Janoshek fct)
+        y = n - y,
+        # Compute prop parent (Janoshek fct is increasing)
+        p = y / n
     ) |> 
     ungroup() |> 
-    mutate(
-        # Janoscheck requires to define
-        # the outcome in terms of % parent
-        y = n-y,
-        p = y/n
-    ) |> 
-    ## Arrange for STAN
+    # Arrange for STAN
     arrange(year, age)
 
 # Visualize the data
@@ -106,9 +145,18 @@ pars <- do.call("rbind", pars)
 range.pars <- apply(pars, 2, range)
 var.pars <- apply(pars, 2, var)
 
+# Check fit of obtained pars
+for (y in years) {
+    
+    i <- which(years == y)
+    
+    plot(x = 0:29, y = df.us$p[df.us$year == y], main = y)
+    lines(x = 0:29, y = get_jano(pars[i, 1], pars[i, 2], pars[i, 3], pars[i, 4], 0:29), type = "l")
+}
 
 
-## === FIT IN STAN =============================================================
+
+## ==== FIT IN STAN ============================================================
 
 # STAN set-up ------------------------------------------------------------------
 
@@ -149,7 +197,7 @@ stanInit = function() {
 
 ## US-level --------------------------------------------------------------------
 
-## STAN data
+# STAN data
 stan_data <- list(
     # Dimensions
     N = dim(df.us)[1],
@@ -174,7 +222,7 @@ fit = stan(here("code", "stan", "p0_jano.stan"),
            chains = nchains
 )
 
-## Store p 
+# Store p 
 p.fit <- array(as.matrix(fit, "p"),
                c(nsim, n.ages, n.years),
                dimnames = list(1:nsim,
@@ -197,12 +245,19 @@ df.p.us <- as.data.frame.table(p.ci) %>%
 
 ## Store estimates
 saveRDS(df.p.us,
-        here("data", "df_p0_us_jano_fit.rda"))
+        here(
+            "data", 
+            "df_p0_us_jano_fit.rds"
+            )
+        )
 
 ## Load estimates
 # df.p.us <- readRDS(
-#     here("data", "df_p0_us_jano_fit.rda")
-# )
+#     here(
+#         "data", 
+#         "df_p0_us_jano_fit.rds"
+#         )
+#     )
 
 ## Race/eth-level --------------------------------------------------------------
 
@@ -222,8 +277,8 @@ df.race <- df |>
     mutate(
         # Janoscheck requires to define
         # the outcome in terms of % parent
-        y = n-y,
-        p = y/n
+        y = n - y,
+        p = y / n
     ) |> 
     ## Arrange for STAN
     arrange(race_eth, year, age)
@@ -234,7 +289,7 @@ n.races <- length(races)
 # Define grouping in STAN
 n.groups <- n.races
 
-## STAN data
+# STAN data
 stan_data <- list(
     # Dimensions
     N = dim(df.race)[1],
@@ -259,7 +314,7 @@ fit = stan(here("code", "stan", "p0_jano.stan"),
            chains = nchains
 )
 
-## Store p 
+# Store p 
 p.fit <- array(as.matrix(fit, "p"),
                c(nsim, n.races, n.ages, n.years),
                dimnames = list(1:nsim,
@@ -267,7 +322,7 @@ p.fit <- array(as.matrix(fit, "p"),
                                ages,
                                years
                ))
-## Quantile of p
+# Quantile of p
 p.ci <- apply(p.fit, c(2:4), quantile, probs = c(0.975, 0.5, 0.025))
 
 df.p.race <- as.data.frame.table(p.ci) %>%
@@ -282,14 +337,21 @@ df.p.race <- as.data.frame.table(p.ci) %>%
     mutate(age = as.character(age) %>% as.numeric,
            year = as.character(year) %>% as.numeric)
 
-## Store estimates
+# Store estimates
 saveRDS(df.p.race,
-        here("data", "df_p0_race_jano_fit.rda"))
+        here(
+            "data", 
+            "df_p0_race_jano_fit.rds"
+            )
+        )
 
-## Load estimates
+# Load estimates
 # df.p.race <- readRDS(
-#     here("data", "df_p0_race_jano_fit.rda")
-# )
+#     here(
+#         "data", 
+#         "df_p0_race_jano_fit.rds"
+#         )
+#     )
 
 ## State-level -----------------------------------------------------------------
 
@@ -330,8 +392,8 @@ df.state <- df |>
     mutate(
         # Janoscheck requires to define
         # the outcome in terms of % parent
-        y = n-y,
-        p = y/n
+        y = n - y,
+        p = y / n
     ) |> 
     filter(
         name %in% sample.states
@@ -395,12 +457,19 @@ df.p.state <- as.data.frame.table(p.ci) %>%
 
 ## Store estimates
 saveRDS(df.p.state,
-        here("data", "df_p0_state_jano_fit.rda"))
+        here(
+            "data", 
+            "df_p0_state_jano_fit.rds"
+            )
+        )
 
 ## Load estimates
 # df.p.race <- readRDS(
-#     here("data", "df_p0_state_jano_fit.rda")
-# )
+#     here(
+#         "data", 
+#         "df_p0_state_jano_fit.rds"
+#         )
+#     )
 
 
 ## === VISUALIZATION OF FIT ====================================================
@@ -416,13 +485,23 @@ df.p.us |>
     ) |> 
     ggplot(aes(x = age)) +
     facet_wrap( ~ year) +
+    geom_ribbon(aes(ymin = lower95,
+                    ymax = upper95),
+                col = NA,
+                fill = "red4",
+                alpha = .3) + 
     geom_line(aes(y = median),
-              col = "red4") +
+              col = "red4",
+              linewidth = 1) +
     # geom_ribbon(col = NA) +
-    geom_point(aes(y = y/n), size = 1) +
-    theme_bw()
+    geom_point(aes(y = y / n), 
+               col = "skyblue3",
+               alpha = .6) +
+    theme_bw() +
+    labs(x = "Age",
+         y = "Proportion parent")
 
-# Race
+# Race over time
 df.p.race |> 
     left_join(
         df.race |> 
@@ -431,24 +510,40 @@ df.p.race |>
             ),
         by = c("age", "year", "race_eth")
     ) |> 
-    filter(
-        year %in% c(2008, 2012, 2016, 2020)
-    ) |> 
-    ggplot(aes(x = age)) +
-    facet_grid(race_eth ~ year) +
-    geom_line(aes(y = median),
-              col = "red4") +
-    # geom_ribbon(col = NA) +
-    geom_point(aes(y = y/n), size = 1) +
-    theme_bw()
-
-# Race over time
-df.p.race |> 
-    ggplot(aes(x = age, 
-               group = year, col = year)) +
-    facet_wrap( ~ race_eth) +
+    ggplot(aes(x = age,
+               group = race_eth,
+               col = race_eth)) +
+    facet_wrap(~ year) +
     geom_line(aes(y = median)) +
-    theme_bw()
+    # geom_ribbon(col = NA) +
+    geom_point(aes(y = y / n), 
+               alpha = .6) +
+    theme_bw() +
+    theme(legend.position = c(0.75, 0.15)) +
+    labs(x = "Age",
+         y = "Proportion parent")
+
+# Race 
+df.p.race |> 
+    left_join(
+        df.race |> 
+            mutate(age = as.character(age) |> as.numeric(),
+                   year = as.character(year) |> as.numeric()
+            ),
+        by = c("age", "year", "race_eth")
+    ) |> 
+    ggplot(aes(x = age,
+               col = race_eth)) +
+    facet_grid(race_eth ~ year) +
+    geom_line(aes(y = median)) +
+    # geom_ribbon(col = NA) +
+    geom_point(aes(y = y / n), 
+               alpha = .6) +
+    theme_bw() +
+    theme(legend.position = "top",
+          legend.title = element_blank()) +
+    labs(x = "Age",
+         y = "Proportion parent")
 
 # State
 ## Join fit and data
@@ -473,10 +568,14 @@ fig.fit.state <- lapply(sample.states, function(x) {
         ggplot(aes(x = age)) +
         facet_wrap(~ year,
                    scales = "free_y") +
-        geom_point(aes(y = p)) +
-        geom_line(aes(y = median), linewidth = 1) +
+        geom_line(aes(y = median), 
+                  linewidth = 1,
+                  col = "red4") +
         geom_ribbon(aes(ymin = lower95, ymax = upper95),
-                    alpha = .3, col = NA) +
+                    alpha = .3, col = NA, fill = "red4") +
+        geom_point(aes(y = p),
+                   col = "skyblue3",
+                   alpha = .6) +
         theme_bw() +
         labs(title = x)
 })
