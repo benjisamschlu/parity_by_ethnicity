@@ -254,7 +254,7 @@ saveRDS(df.p.us,
 ## Load estimates
 # df.p.us <- readRDS(
 #     here(
-#         "data", 
+#         "data",
 #         "df_p0_us_jano_fit.rds"
 #         )
 #     )
@@ -348,7 +348,7 @@ saveRDS(df.p.race,
 # Load estimates
 # df.p.race <- readRDS(
 #     here(
-#         "data", 
+#         "data",
 #         "df_p0_race_jano_fit.rds"
 #         )
 #     )
@@ -464,9 +464,9 @@ saveRDS(df.p.state,
         )
 
 ## Load estimates
-# df.p.race <- readRDS(
+# df.p.state <- readRDS(
 #     here(
-#         "data", 
+#         "data",
 #         "df_p0_state_jano_fit.rds"
 #         )
 #     )
