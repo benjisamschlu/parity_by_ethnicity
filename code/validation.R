@@ -42,7 +42,7 @@ for(p in packages){
 df <- readRDS(
     here(
         "data", 
-        "df_childness.rds"
+        "df_childness_not_corrected.rds"
         )
     ) 
 # Childless corrected with hh info
@@ -50,7 +50,7 @@ df <- readRDS(
 df_cor <- readRDS(
     here(
         "data", 
-        "df_childness_cor_2008_10.rds"
+        "df_childness_corrected.rds"
     )
 ) 
 

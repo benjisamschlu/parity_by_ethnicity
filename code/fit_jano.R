@@ -31,39 +31,24 @@ for(p in packages){
 
 
 
-
 ## ==== LOAD DATA ==============================================================
 
 # Childless corrected with hh info
 # for the years 2008 and 2010
-df_cor <- readRDS(
-    here(
-        "data", 
-        "df_childness_cor_2008_10.rds"
-    )
-) 
-# Childless by race and state
 df <- readRDS(
     here(
         "data", 
         "df_childness.rds"
     )
-) |> 
-    filter(
-        # Focus on years using coresident info
-        year >= 2012
-    )
-
-# Bind corrected years with the rest
-df <- bind_rows(
-    df_cor, df
-)
+) 
 
 # Key dimensions in code 
 ages <- unique(df$age)
 n.ages <- length(ages)
 years <- unique(df$year)
+years.all <- min(years):max(years)
 n.years <- length(years)
+n.years.all <- length(min(years):max(years))
 
 
 
@@ -100,9 +85,10 @@ get_jano <- function(U, L, k, c, x) {
 
 # Get plausible initial pars value by trial error
 # for mid-period year: 2010
-plot(x = 0:29, y = df.us$p[df.us$year == 2010])
-lines(x = 0:29, y = get_jano(0.83, 0.01, 0.012, 1.8, 0:29), type = "l")
-par.init <- c(0.83, 0.01, 0.012, 1.8)
+plot(x = 0:35, y = df.us$p[df.us$year == 2012])
+lines(x = 0:35, y = get_jano(0.84, 0.01, 0.012, 1.8, 0:35), type = "l")
+
+par.init <- c(0.84, 0.01, 0.012, 1.8)
 
 ## Data used in optim() to minimize RSS
 df.rss <- 
@@ -148,10 +134,14 @@ var.pars <- apply(pars, 2, var)
 # Check fit of obtained pars
 for (y in years) {
     
+    if (y %in% c(2008, 2010)) {
+        x <- 0:29
+    } else {x <- 0:35}
+    
     i <- which(years == y)
     
-    plot(x = 0:29, y = df.us$p[df.us$year == y], main = y)
-    lines(x = 0:29, y = get_jano(pars[i, 1], pars[i, 2], pars[i, 3], pars[i, 4], 0:29), type = "l")
+    plot(x = x, y = df.us$p[df.us$year == y], main = y)
+    lines(x = x, y = get_jano(pars[i, 1], pars[i, 2], pars[i, 3], pars[i, 4], x), type = "l")
 }
 
 
@@ -165,7 +155,7 @@ nwarmup = niter/2
 nchains = 4
 nsim = (niter-nwarmup)*nchains
 options(mc.cores = parallel::detectCores()-1)
-pars <- c("p")
+pars <- c("p", "U", "L", "k", "c")
 
 # Inits -----------------------------------------------------------------------
 
@@ -184,10 +174,10 @@ stanInit = function() {
     var.c <- var.pars[4]
     
     list(
-        U = matrix( runif(n.years*n.groups, range.pars[1, 1], range.pars[2, 1]), n.years, n.groups),
-        L = matrix( runif(n.years*n.groups, range.pars[1, 2], range.pars[2, 2]), n.years, n.groups),
-        k = matrix( runif(n.years*n.groups, range.pars[1, 3], range.pars[2, 3]), n.years, n.groups),
-        c = matrix( runif(n.years*n.groups, range.pars[1, 4], range.pars[2, 4]), n.years, n.groups),
+        U = matrix( runif(n.years.all*n.groups, range.pars[1, 1], range.pars[2, 1]), n.years.all, n.groups),
+        L = matrix( runif(n.years.all*n.groups, range.pars[1, 2], range.pars[2, 2]), n.years.all, n.groups),
+        k = matrix( runif(n.years.all*n.groups, range.pars[1, 3], range.pars[2, 3]), n.years.all, n.groups),
+        c = matrix( runif(n.years.all*n.groups, range.pars[1, 4], range.pars[2, 4]), n.years.all, n.groups),
         sigma_U = runif(1, var.pars[1]/10, var.pars[1]*10),
         sigma_L = runif(1, var.pars[2]/10, var.pars[2]*10),
         sigma_k = runif(1, var.pars[3]/10, var.pars[3]*10),
@@ -195,16 +185,38 @@ stanInit = function() {
     )
 }
 
+# Create indexing var for missing years/ages
+p.idx <- expand.grid(
+    age = ages,
+    year = min(years):max(years)
+) |> 
+    mutate(
+        # Create index from 1 to N
+        idx = row_number()
+    ) |> 
+    filter(
+        # Remove cells not available in data:
+        # Unavailable years
+        !(year %in% seq(2009, 2021, 2)),
+        # Unavailable ages
+        !(age >= 45 & year %in% c(2008, 2010))
+    ) |> 
+    pull(idx)
+
+
 ## US-level --------------------------------------------------------------------
 
 # STAN data
 stan_data <- list(
     # Dimensions
     N = dim(df.us)[1],
-    Y_obs = n.years,
-    A = n.ages,
-    age = 0:29,
+    T_obs = n.years,
+    T_all = n.years.all,
+    A_all = n.ages,
+    age = 0:35,
     G = n.groups,
+    # Indexing for missing years/ages
+    p_i = p.idx,
     # Careful !!
     # Structured as vector but order super important !!!
     # Needs to coincide with logmx_ord in STAN (multiple to_vector() )
@@ -212,7 +224,7 @@ stan_data <- list(
     n = round(df.us$n, 0)
 )
 
-fit = stan(here("code", "stan", "p0_jano.stan"),
+fit = stan(here("code", "stan", "p0_jano_extrapol.stan"),
            data = stan_data,
            pars  = pars,
            init = stanInit,
@@ -224,10 +236,10 @@ fit = stan(here("code", "stan", "p0_jano.stan"),
 
 # Store p 
 p.fit <- array(as.matrix(fit, "p"),
-               c(nsim, n.ages, n.years),
+               c(nsim, n.ages, n.years.all),
                dimnames = list(1:nsim,
                                ages,
-                               years
+                               years.all
                ))
 ## Quantile of p
 p.ci <- apply(p.fit, c(2:3), quantile, probs = c(0.975, 0.5, 0.025))
@@ -243,7 +255,7 @@ df.p.us <- as.data.frame.table(p.ci) %>%
     mutate(age = as.character(age) %>% as.numeric,
            year = as.character(year) %>% as.numeric)
 
-## Store estimates
+# Store estimates
 saveRDS(df.p.us,
         here(
             "data", 
@@ -251,13 +263,55 @@ saveRDS(df.p.us,
             )
         )
 
-## Load estimates
+# # Load estimates
 # df.p.us <- readRDS(
 #     here(
 #         "data",
 #         "df_p0_us_jano_fit.rds"
 #         )
 #     )
+
+# Store pars 
+pars.us <- lapply(pars[pars != "p"], function(x) {
+    
+    # Store in arrays
+    par.draw <- array(as.matrix(fit, x),
+                      c(nsim, n.years.all),
+                      dimnames = list(1:nsim,
+                                      years.all))
+    # Get CI
+    par.ci <- apply(par.draw, 
+                    2, 
+                    quantile, probs = c(0.975, 0.5, 0.025))
+    # Store in df
+    out <- as.data.frame.table(par.ci) %>%
+        rename("year" = Var2) %>%
+        mutate(Var1 = case_when( 
+            Var1 == "97.5%" ~ "upper95",
+            Var1 == "50%" ~ "median",
+            Var1 == "2.5%" ~ "lower95")) |> 
+        pivot_wider(names_from = Var1, values_from = Freq) %>% 
+        mutate(year = as.character(year) %>% as.numeric,
+               par = x)
+})
+# Combine list items into one data frame
+df.pars.us <- do.call("rbind", pars.us)
+
+# Store estimates
+saveRDS(df.pars.us,
+        here(
+            "data", 
+            "df_pars_us_jano_fit.rds"
+        )
+)
+
+# Load estimates
+# df.pars.us <- readRDS(
+#     here(
+#         "data",
+#         "df_pars_us_jano_fit.rds"
+#     )
+# )
 
 ## Race/eth-level --------------------------------------------------------------
 
@@ -281,9 +335,9 @@ df.race <- df |>
         p = y / n
     ) |> 
     ## Arrange for STAN
-    arrange(race_eth, year, age)
+    arrange(race_eth, year, age) 
 
-races <- unique(df.race$race_eth)
+races <- unique(df.race$race_eth) # order of race in df.race
 n.races <- length(races)
 
 # Define grouping in STAN
@@ -293,10 +347,14 @@ n.groups <- n.races
 stan_data <- list(
     # Dimensions
     N = dim(df.race)[1],
-    Y_obs = n.years,
-    A = n.ages,
-    age = 0:29,
+    N_g = dim(df.race)[1]/n.groups,
+    T_obs = n.years,
+    T_all = n.years.all,
+    A_all = n.ages,
+    age = 0:35,
     G = n.groups,
+    # Indexing for missing years/ages
+    p_i = p.idx,
     # Careful !!
     # Structured as vector but order super important !!!
     # Needs to coincide with logmx_ord in STAN (multiple to_vector() )
@@ -304,7 +362,9 @@ stan_data <- list(
     n = round(df.race$n, 0)
 )
 
-fit = stan(here("code", "stan", "p0_jano.stan"),
+
+
+fit = stan(here("code", "stan", "p0_jano_extrapol.stan"),
            data = stan_data,
            pars  = pars,
            init = stanInit,
@@ -315,12 +375,12 @@ fit = stan(here("code", "stan", "p0_jano.stan"),
 )
 
 # Store p 
-p.fit <- array(as.matrix(fit, "p"),
-               c(nsim, n.races, n.ages, n.years),
+p.fit <- array(as.matrix(fit, pars = "p"),
+               c(nsim, n.races, n.ages, n.years.all),
                dimnames = list(1:nsim,
                                races, 
                                ages,
-                               years
+                               years.all
                ))
 # Quantile of p
 p.ci <- apply(p.fit, c(2:4), quantile, probs = c(0.975, 0.5, 0.025))
@@ -352,6 +412,53 @@ saveRDS(df.p.race,
 #         "df_p0_race_jano_fit.rds"
 #         )
 #     )
+
+# Store pars 
+pars.race <- lapply(pars[pars != "p"], function(x) {
+    
+    # Store in arrays
+    par.draw <- array(as.matrix(fit, x),
+                      c(nsim, n.years.all, n.races),
+                      dimnames = list(1:nsim,
+                                      years.all,
+                                      races
+                                      ))
+    # Get CI
+    par.ci <- apply(par.draw, 
+                    2:3, 
+                    quantile, probs = c(0.975, 0.5, 0.025))
+    # Store in df
+    out <- as.data.frame.table(par.ci) %>%
+        rename("year" = Var2,
+               "race_eth" = Var3) %>%
+        mutate(Var1 = case_when( 
+            Var1 == "97.5%" ~ "upper95",
+            Var1 == "50%" ~ "median",
+            Var1 == "2.5%" ~ "lower95")) |> 
+        pivot_wider(names_from = Var1, values_from = Freq) %>% 
+        mutate(year = as.character(year) %>% as.numeric,
+               par = x)
+})
+
+# Combine list items into one data frame
+df.pars.race <- do.call("rbind", pars.race)
+
+# Store estimates
+saveRDS(df.pars.race,
+        here(
+            "data", 
+            "df_pars_race_jano_fit.rds"
+        )
+)
+
+# Load estimates
+# df.pars.race <- readRDS(
+#     here(
+#         "data",
+#         "df_pars_race_jano_fit.rds"
+#     )
+# )
+
 
 ## State-level -----------------------------------------------------------------
 
@@ -474,7 +581,7 @@ saveRDS(df.p.state,
 
 ## === VISUALIZATION OF FIT ====================================================
 
-# US
+# p - US
 df.p.us |> 
     left_join(
         df.us |> 
@@ -499,9 +606,24 @@ df.p.us |>
                alpha = .6) +
     theme_bw() +
     labs(x = "Age",
-         y = "Proportion parent")
+         y = "Proportion mothers")
 
-# Race over time
+# pars - US
+df.pars.us |> 
+    ggplot(aes(x = year, 
+               y = median,
+               ymin = lower95,
+               ymax = upper95)) +
+    facet_wrap(~ par,
+               scale = "free_y")+
+    geom_ribbon(col = NA,
+                fill = "red4",
+                alpha = .3) +
+    geom_line(col = "red4",
+              linewidth = 1) +
+    theme_bw() 
+
+# p - Race over time
 df.p.race |> 
     left_join(
         df.race |> 
@@ -512,18 +634,25 @@ df.p.race |>
     ) |> 
     ggplot(aes(x = age,
                group = race_eth,
-               col = race_eth)) +
+               col = race_eth,
+               fill = race_eth)) +
     facet_wrap(~ year) +
+    geom_ribbon(aes(ymin = lower95,
+                    ymax = upper95),
+                col = NA,
+                alpha = .3) +
     geom_line(aes(y = median)) +
     # geom_ribbon(col = NA) +
     geom_point(aes(y = y / n), 
                alpha = .6) +
     theme_bw() +
-    theme(legend.position = c(0.75, 0.15)) +
+    theme(legend.position = c(0.85, 0.15)) +
     labs(x = "Age",
-         y = "Proportion parent")
+         y = "Proportion mother",
+         col = "Race/ethnicity",
+         fill = "Race/ethnicity")
 
-# Race 
+# p - Race 
 df.p.race |> 
     left_join(
         df.race |> 
@@ -533,8 +662,13 @@ df.p.race |>
         by = c("age", "year", "race_eth")
     ) |> 
     ggplot(aes(x = age,
-               col = race_eth)) +
+               col = race_eth,
+               fill =race_eth)) +
     facet_grid(race_eth ~ year) +
+    geom_ribbon(aes(ymin = lower95,
+                    ymax = upper95),
+                col = NA,
+                alpha = .3) +
     geom_line(aes(y = median)) +
     # geom_ribbon(col = NA) +
     geom_point(aes(y = y / n), 
@@ -543,7 +677,23 @@ df.p.race |>
     theme(legend.position = "top",
           legend.title = element_blank()) +
     labs(x = "Age",
-         y = "Proportion parent")
+         y = "Proportion mother")
+
+# pars - Race
+df.pars.race |> 
+    ggplot(aes(x = year, 
+               y = median,
+               ymin = lower95,
+               ymax = upper95,
+               group = race_eth,
+               col = race_eth,
+               fill = race_eth)) +
+    facet_wrap(~ par,
+               scale = "free_y")+
+    geom_ribbon(col = NA,
+                alpha = .3) +
+    geom_line(linewidth = 1) +
+    theme_bw() 
 
 # State
 ## Join fit and data
@@ -588,26 +738,4 @@ ggsave(
 )
 
 
-
-## === JANOSCHEK & FX ==========================================================
-
-# Derivative of Janoschek fct
-get_r <- function(U, L, k, c, x) {
-    
-    r <- k * c * (U - L) * x^(c - 1) * exp(-k * x^c)
-}
-fx <- get_r(pars[10,1], pars[10,2], pars[10,3], pars[10,4], 0:29)
-plot(x = 15:44, y = fx, type = "l") 
-
-# Normalise to sum to 1
-fx <- fx/sum(fx)
-
-# Multiply by TFR in 2010
-fx <- fx * 1.73
-
-# Not conclusive and TFR refers to all children
-# Modify by:
-# Using STAN pars instead of optim
-# What to replace TFR with?
-    
 

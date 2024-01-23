@@ -67,7 +67,7 @@ df <- nsfg_df |>
         p3 = ifelse(parity == 3, 1, 0),
         p4 = ifelse(parity >= 4, 1, 0),
         ## Name abbridged race
-        abr_race = case_when(
+        race_eth = case_when(
             hisprace2 == 1 ~ "Hispanic",
             hisprace2 == 2 ~ "NH-White",
             hisprace2 == 3 ~ "NH-Black",
@@ -95,12 +95,32 @@ df.p.nsfg <- tibble(
     dplyr::select(age_r, p0, p1, p2, p3, p4) |> 
     pivot_longer(p0:p4, names_to = "parity", values_to = "p")
 
+# Store data 
+# saveRDS(df.p.nsfg |>
+#             filter(parity == "p0") |>
+#             dplyr::select(!parity),
+#         here(
+#             "data",
+#             "df_childness_us_nsfg.rds"
+#         )
+# )
+
 ## Weighted parity by age and race
 df.p.race.nsfg <- tibble(
-    svyby( ~ p0 + p1 + p2 + p3 + p4 , ~ age_r + abr_race , nsfg_design , svymean )
+    svyby( ~ p0 + p1 + p2 + p3 + p4 , ~ age_r + race_eth , nsfg_design , svymean )
 ) |> 
-    dplyr::select(age_r, abr_race, p0, p1, p2, p3, p4) |> 
+    dplyr::select(age_r, race_eth, p0, p1, p2, p3, p4) |> 
     pivot_longer(p0:p4, names_to = "parity", values_to = "p")
+
+# Store data 
+# saveRDS(df.p.race.nsfg |> 
+#             filter(parity == "p0") |> 
+#             dplyr::select(!parity),
+#         here(
+#             "data", 
+#             "df_childness_race_nsfg.rds"
+#         )
+# )
 
 ## HFD
 df.p.hfd <- exppa |> 
@@ -161,18 +181,18 @@ combined.df |>
 ## NSFG by race
 df.p.race.nsfg |> 
     filter(
-        abr_race != "NH-Other"
+        race_eth != "NH-Other"
     ) |> 
     ggplot(aes(x = age_r, y = p, 
                col = parity)) + 
-    facet_wrap( ~ abr_race) +
+    facet_wrap( ~ race_eth) +
     geom_line(linewidth = 1) +
     theme_bw()
 
 ## NSFG by race and % parent
 df.p.race.nsfg |> 
     filter(
-        abr_race != "NH-Other",
+        race_eth != "NH-Other",
         age_r < 45,
         parity == "p0"
     ) |> 
@@ -181,7 +201,7 @@ df.p.race.nsfg |>
     ) |> 
     ggplot(aes(x = age_r, 
                y = parent)) + 
-    facet_wrap( ~ abr_race) +
+    facet_wrap( ~ race_eth) +
     geom_line(linewidth = 1) +
     geom_point() +
     theme_bw()

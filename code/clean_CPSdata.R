@@ -43,7 +43,7 @@ for(p in packages){
 data <- read_csv(
     here(
         "data_private", 
-        "cps_00005.csv.gz"
+        "cps_00007.csv.gz"
         )
     ) |> 
     rename_all(.funs = tolower) |> 
@@ -60,26 +60,43 @@ data <- read_csv(
                              race == 200 & hispan == 0 ~ "NH-Black",
                              !(race %in% c(100, 200)) & hispan == 0 ~ "NH-Other",
                              hispan != 0 ~ "Hispanic")
-    ) |> 
+    ) |>
     filter(
         # Survey conducted every two years (2022 has no info on frever)
-        year %in% seq(2000, 2020, 2)
+        year %in% seq(2000, 2022, 2)
     )
 
-# Wikipedia pages with States names and fip codes 
-url <- "https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code"
-page = read_html(url)
+# Get data set with state names and fip codes
 
-# Obtain the piece of the web page that corresponds to the "wikitable" node
-fip.table = html_node(page, ".wikitable")
+# # Wikipedia pages with States names and fip codes
+# url <- "https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code"
+# page = read_html(url)
+# 
+# # Obtain the piece of the web page that corresponds to the "wikitable" node
+# fip.table = html_node(page, ".wikitable")
+# 
+# # Convert the html table element into a data frame
+# fip.table = html_table(fip.table, fill = TRUE)
+# 
+# # Tidying
+# fip.table <- fip.table |>
+#     filter(`Alpha code` != "") |>
+#     dplyr::select(name = Name, statefip = `Numeric code`)
+# 
+# # Store data on states
+# saveRDS(fip.table,
+#         here(
+#             "data",
+#             "df_fip.rds"
+#         )
+# )
 
-# Convert the html table element into a data frame
-fip.table = html_table(fip.table, fill = TRUE)
-
-# Tidying 
-fip.table <- fip.table |> 
-    filter(`Alpha code` != "") |> 
-    dplyr::select(name = Name, statefip = `Numeric code`)
+fip.table <- readRDS(
+    here(
+        "data",
+        "df_fip.rds"
+    )
+)
 
 
 
@@ -91,10 +108,10 @@ df <- data |>
         # Question on children only asked to women
         sex == 2,
         # aged 15-45 not having 999.
-        # Only in latest CPS that itwees
+        # Only from 2012 CPS that itwees
         # are until 50 yo
         age >= 15,
-        age < 45,
+        !(year %in% c(2008, 2010) & age >= 45),
         # Remove when info on frever is not collected
         frever != 999
         )
@@ -128,7 +145,7 @@ df.chldness <- df |>
 saveRDS(df.chldness,
         here(
             "data", 
-            "df_childness.rds"
+            "df_childness_not_corrected.rds"
             )
         )
 
@@ -218,12 +235,27 @@ df.chldness.cor <- df_cor |>
 saveRDS(df.chldness.cor,
         here(
             "data", 
-            "df_childness_cor_2008_10.rds"
+            "df_childness_corrected.rds"
         )
 ) 
 
-# use nber of children from hh info in other years?
-# risky, children might be out of hh
-# -> only use when frever==0 but child(ren) in hh
 
-# can frever == 999 and frever_cor>0?
+
+## DATA FRAME WITH 2008 AND 2010 CORRECTED =====================================
+
+# Combine the two data frames replacing the uncorrected years
+# with the corrected ones
+df.chldness.tidy <- 
+    bind_rows(
+        df.chldness |> 
+            filter(year >= 2012),
+        df.chldness.cor
+    )
+
+# Store data 
+saveRDS(df.chldness.tidy,
+        here(
+            "data", 
+            "df_childness.rds"
+        )
+) 

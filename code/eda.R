@@ -37,27 +37,26 @@ for(p in packages){
 
 # Childless corrected with hh info
 # for the years 2008 and 2010
-df_cor <- readRDS(
-    here(
-        "data", 
-        "df_childness_cor_2008_10.rds"
-    )
-) 
-# Childless by race and state
 df <- readRDS(
     here(
         "data", 
         "df_childness.rds"
-        )
-    ) |> 
-    filter(
-        # Focus on years using coresident info
-        year >= 2012
     )
+) 
 
-# Bind corrected years with the rest
-df <- bind_rows(
-    df_cor, df
+# Childlessness from NSFG data
+df.p.nsfg <- readRDS(
+    here(
+        "data",
+        "df_childness_us_nsfg.rds"
+    )
+)
+
+df.p.race.nsfg <- readRDS(
+    here(
+        "data",
+        "df_childness_race_nsfg.rds"
+    )
 )
 
 
@@ -118,4 +117,39 @@ df |>
     geom_point() +
     geom_line() +
     theme_bw()
+
+# Comparison of childlessness 
+# from CPS and NSFG by race 
+bind_rows(
+    df |> 
+        summarise(
+            # National level by year and 5y age group
+            .by = c(year, age, race_eth),
+            
+            across(y:n, ~ sum(.x))
+        ) |> 
+        filter(year == 2018) |> 
+        mutate(
+            p = y / n,
+            p = 1 - p,
+            data = "CPS"
+        ) |> 
+        dplyr::select(age, race_eth, p, data),
+    
+    df.p.race.nsfg |> 
+        rename(age = "age_r") |> 
+        mutate(
+            p = 1 - p,
+            data = "NSFG"
+        )
+) |> 
+    ggplot(aes(x = age,
+               y = p,
+               group = data,
+               col = data)) +
+    facet_wrap(~ race_eth) +
+    geom_point() +
+    geom_line() +
+    theme_bw()
+    
 
