@@ -3,7 +3,7 @@
 ##
 ##  Project title: Modeling of childlessness
 ##
-##  This code loads, cleans up, and tidy the data used to estimate
+##  This code loads, cleans up, and tidy the CPS data used to estimate
 ##  the proportion of childless women.
 ##
 ## 
