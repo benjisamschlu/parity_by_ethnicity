@@ -35,11 +35,11 @@ source(here("code", "secrets.R"))
 #                   dependencies = TRUE)
 # devtools::install_github("ajdamico/lodown" , dependencies = TRUE )
 # library(lodown)
-# # Examine all available NSFG microdata files
+# Examine all available NSFG microdata files
 # nsfg_cat <-
 #     get_catalog("nsfg" ,
 #                 output_dir = here("data_raw") )
-
+# 
 # # 2017-2019 only
 # nsfg_cat <- subset( nsfg_cat , grepl( "2017_2019" , full_url ) )
 # # Download the microdata to your local computer
@@ -53,6 +53,75 @@ exppa <- readHFDweb(CNTRY = "USA",
                     item = "exposRRpa",
                     username = usr,
                     password = pwd)
+
+
+# New try based on https://asdfree.com/national-survey-of-family-growth-nsfg.html
+
+library(SAScii)
+library(readr)
+
+# Need to add per
+dwld.period <- c("2011_2013", "2013_2015", "2015_2017", "2017_2019")
+for (p in dwld.period) {
+    
+    if (p != "2006_2010") {
+        file_name <- "_FemRespData.dat"
+    } else { 
+        file_name <- "_FemResp.dat"
+        }
+    # Url to download data
+    dat_url <- paste0(
+        "https://ftp.cdc.gov/pub/Health_Statistics/NCHS/Datasets/NSFG/",
+        p,
+        file_name
+    )
+    
+    sas_url <-
+        file.path(dirname(dat_url) , 
+                   paste0("sas/",
+                          p,
+                          "_FemRespSetup.sas") )
+    
+    sas_positions <-
+        parse.SAScii( sas_url )
+    
+    sas_positions[ , 'varname' ] <-
+        tolower( sas_positions[ , 'varname' ] )
+    
+    sas_positions[ , 'column_types' ] <-
+        ifelse( sas_positions[ , 'char' ] , "c" , "d" )
+    
+    # Load data
+    nsfg_tbl <-
+        read_fwf(
+            dat_url ,
+            fwf_widths( 
+                abs( sas_positions[ , 'width' ] ) , 
+                col_names = sas_positions[ , 'varname' ] 
+            ) ,
+            col_types = paste0( sas_positions[ , 'column_types' ] , collapse = "" ) ,
+            na = c( "" , "." )
+        )
+    
+    # Select variables of interest
+    nsfg_df <- data.frame( nsfg_tbl ) |> 
+        dplyr::select(
+            age_r, hisprace2, parity, secu, sest, !!sym(paste0("wgt", p))
+        ) |> 
+        mutate(
+            period = p
+        )
+    
+    # Store data
+    saveRDS(nsfg_df, 
+            here(
+                "data_private",
+                paste0(p, "_FemRespData.rds")
+            ), 
+            compress = FALSE )
+}
+
+
 
 ## Tidy data -------------------------------------------------------------------
 
