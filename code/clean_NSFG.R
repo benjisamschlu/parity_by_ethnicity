@@ -126,6 +126,14 @@ saveRDS(nsfg.df,
         ), 
         compress = FALSE )
 
+# Load data
+# nsfg.df <- readRDS(
+#     here(
+#         "data_private",
+#         "2006_2019_NSFG_FemRespData.rds"
+#     )
+# )
+
 
 
 ## TIDY DATA ===================================================================
@@ -147,7 +155,7 @@ df <- nsfg.df |>
             hisprace2 == 4 ~ "NH-Other"
         )
     )
-## Complex survey desing
+## Complex survey design
 nsfg_design <- 
     svydesign( 
         id = ~ secu , 
@@ -186,6 +194,23 @@ df.p.race.nsfg <- tibble(
         names_to = "parity",
         values_to = "p"
         )
+
+## Weighted childlessness by age and race
+df.p0.race.nsfg <- tibble(
+    svyby( ~ p0 , ~ age_r + race_eth + period, nsfg_design , svymean )
+) |> 
+    mutate(
+        l.period = sub("\\_.*", "", period) |> as.numeric(),
+        u.period = sub(".*_", "", period) |> as.numeric()
+    )
+## Store data
+# saveRDS(
+#     df.p0.race.nsfg, 
+#     here(
+#         "data_private",
+#         "p0_nsfg.rds"
+#         ), 
+#     compress = FALSE )
 
 
 
