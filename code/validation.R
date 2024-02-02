@@ -36,42 +36,26 @@ for(p in packages){
 
 ## LOAD DATA ===================================================================
 
-# Careful: no observation for all years (~ every 2 y)
-
-# Childless by race and state
-df <- readRDS(
+# Motherhood at US level
+df.us <- readRDS(
     here(
         "data", 
-        "df_childness_not_corrected.rds"
+        "df_us.rds"
         )
     ) 
-# Childless corrected with hh info
-# for the years 2008 and 2010
-df_cor <- readRDS(
-    here(
-        "data", 
-        "df_childness_corrected.rds"
-    )
-) 
 
 
 
 ## VALIDATION ==================================================================
 
-# Reproduce plot in US Census Bureau report
+# Fig 1
 cols <- c("30" = "blue",
           "35" = "red",
           "40" = "green")
-# Fig 1
-df |> 
-    mutate(
-        data = "initial"
-    ) |> 
-    bind_rows(
-        df_cor |> 
-            mutate(
-                data = "corrected"
-            )
+
+df.us |> 
+    filter(
+        survey == "CPS"
     ) |> 
     mutate(
         # Create 5y age groups
@@ -82,20 +66,18 @@ df |>
     ) |> 
     summarise(
         # National level by year and 5y age group
-        .by = c(year, age5, data),
+        .by = c(year, age5),
         
         across(y:n, ~ sum(.x)),
         # Compute prop childless
-        p = (y / n) * 100
+        p = (1 - (y / n)) * 100
     ) |> 
     filter(
         # Focus on years plotted on report's Fig 1
         year >= 2000,
         year <= 2014,
         # Focus on 3 age groups
-        age5 %in% seq(30, 40, 5),
-        # Check data without correction
-        data == "initial"
+        age5 %in% seq(30, 40, 5)
     ) |> 
     ggplot(aes(x = year, y = p, 
                group = age5, col = age5)) +
@@ -105,57 +87,5 @@ df |>
     scale_y_continuous(breaks = seq(14, 32, 2),
                        limits = c(14, 32)) +
     scale_color_manual(values = cols)
-# Same values
-
-lines <- c("initial" = "solid",
-           "corrected" = "dashed")
-
-# Fig 2
-df |> 
-    mutate(
-        data = "initial"
-    ) |> 
-    bind_rows(
-        df_cor |> 
-            mutate(
-                data = "corrected"
-            )
-    ) |> 
-    mutate(
-        # Create 5y age groups
-        age5 = cut(age,
-                   breaks = seq(15, 45, 5),
-                   labels = seq(15, 40, 5),
-                   right = FALSE)
-    ) |> 
-    summarise(
-        # National level by year and 5y age group
-        .by = c(year, age5, data),
-        
-        across(y:n, ~ sum(.x)),
-        # Compute prop childless
-        p = (y / n) * 100
-    ) |> 
-    filter(
-        # Focus on years plotted on report's Fig 1
-        year >= 2006,
-        year <= 2014,
-        # Focus on 3 age groups
-        age5 %in% seq(30, 40, 5)
-    ) |> 
-    ggplot(aes(x = year, 
-               y = p, 
-               group = interaction(age5, data), 
-               col = age5,
-               linetype = data)) +
-    geom_line() +
-    geom_point() +
-    theme_bw() +
-    scale_y_continuous(breaks = seq(14, 32, 2),
-                       limits = c(14, 32)) +
-    scale_color_manual(values = cols) +
-    scale_linetype_manual(values = lines)
-# Same values except a really small diff for 35
-
-
+    
 

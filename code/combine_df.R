@@ -33,6 +33,45 @@ for(p in packages){
 ## ===== FUNCTIONS =============================================================
 
 
+
+## ===== STATE NAMES & FIP =====================================================
+
+# Get data set with state names and fip codes
+
+# # Wikipedia pages with States names and fip codes
+url <- "https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code"
+page = read_html(url)
+
+# Obtain the piece of the web page that corresponds to the "wikitable" node
+df.fip <- 
+    page |> 
+    html_node(".wikitable") |> 
+    # Convert the html table element into a data frame
+    html_table(fill = TRUE) |> 
+    # Tidying
+    filter(`Alpha code` != "") |>
+    dplyr::select(
+        state = Name, statefip = `Numeric code`
+        )
+
+# Store data on states
+saveRDS(
+    df.fip,
+    here(
+        "data",
+        "df_fip.rds"
+        )
+    )
+
+# Load data on fip code and state names
+# df.fip <- readRDS(
+#     here(
+#         "data",
+#         "df_fip.rds"
+#     )
+# )
+
+
 ## ===== LOAD & TIDY CPS DATA ==================================================
 
 # Load CPS data (extract from IPUMS)
@@ -69,7 +108,12 @@ data.cps <- read_csv(
                              hispan != 0 ~ "Hispanic"),
         # Create HH for survey design
         hhid = paste0(serial, year) |> as.numeric()
-        )
+        ) |> 
+    # Add States names
+    left_join(
+        df.fip,
+        by = c("statefip")
+    ) 
 
 # Data before 2012 need to be corrected (see Census Bureau report)
 data.cps.2012_22 <- 
@@ -87,27 +131,23 @@ data.cps.2012_22 <-
     ) |> 
     mutate(
         # Prop mother
-        mother = ifelse(frever == 0, 0, 1)
+        p = ifelse(frever == 0, 0, 1),
+        # Categorical variable for counts with surey()
+        mother = ifelse(frever == 0, "No", "Yes")
     )
 
 # Correct the data for 2008 and 2010
-# Use hh info and coresident child info to correct proportion childless
+# Utilization of information from the household rosters both to allocate data 
+# in cases of non-response, and to validate responses.
 data.cps.2008_10 <- 
     data.cps |> 
     filter(
         # Two years were info of coresidency wasn't use
-        year %in% c(2008, 2010),
-        # aged 15-45 not having 999.
-        # Only in from 2012 that itwees
-        # are until 50 yo
-        age >= 15,
-        age < 45
+        year %in% c(2008, 2010)
     ) |> 
     mutate(
-        # Set NA because if no child recorded in hh,
-        # it can be that the child already left the hh
-        # so we can't set default value to 0
-        frever_cor = NA
+        # Never frever based on hh roster
+        frever_cor = 0
     )
 
 # Correct frever according to relation to child(ren)
@@ -136,19 +176,27 @@ data.cps.2008_10 <-
     group_modify(correct.frever) |> 
     mutate(
         frever_merge = case_when(
-            # non-response but no child(ren) in hh 
-            (frever == 999 & is.na(frever_cor)) ~ 0,
-            # non-response but child(ren) in hh
-            (frever == 999 & !is.na(frever_cor)) ~ frever_cor,
-            # frever == 0 but child(ren) recorded in hh
-            (frever == 0 & !is.na(frever_cor)) ~ frever_cor,
+            # non-response so use frever_cor
+            frever == 999 ~ frever_cor,
+            # frever == 0 but possible that child(ren) recorded in hh
+            # otherwise frever_cor is also = 0
+            frever == 0 ~ frever_cor,
+            # frever is > 0 so use it (frever_cor might miss children
+            # that left the hh)
             TRUE ~ frever
-        )
-    ) |> 
+            )
+        ) |> 
     ungroup() |> 
     mutate(
         # Prop mother
-        mother = ifelse(frever_merge == 0, 0, 1)
+        p = ifelse(frever_merge == 0, 0, 1),
+        # Categorical variable for counts with surey()
+        mother = ifelse(frever_merge == 0, "No", "Yes")
+    ) |> 
+    filter(
+        # Years 2008 and 2010 only interviewed women aged 15-44
+        age >= 15, 
+        age < 45
     )
 
 # Combine the two data frames replacing the uncorrected years
@@ -157,12 +205,7 @@ data.cps.cor <-
     bind_rows(
         data.cps.2008_10,
         data.cps.2012_22
-    ) |> 
-    filter(
-        # Consider the most populous
-        # subpopulation groups
-        race_eth != "NH-Other"
-    )
+    ) 
 
 # Compute proportions of mother and SE accounting for weights
 # Complex survey design
@@ -173,16 +216,119 @@ cps_design <-
         weights = ~ wtfinl
     )
 
-# Weighted childlessness by age and race
-df.cps <- tibble(
-    svyby( ~ mother , ~ race_eth + year + age, cps_design , svymean )
+# Weighted motherhood prop. by age at US level
+df.cps.p.us <- tibble(
+    svyby( ~ p , ~ year + age, cps_design , svymean )
 ) |> 
     mutate(
-        l95 = mother - (1.96 * se),
-        u95 = mother + (1.96 *se),
-        # Harmonize with NSFG data
-        period = NA
+        l95 = p - (1.96 * se),
+        u95 = p + (1.96 *se)
+    ) |> 
+    arrange(
+        year, age
     )
+
+# Weighted count of mother by age at US level
+df.cps.y.us <- tibble(
+    svyby( ~ mother , ~ year + age, cps_design , svytotal)
+) |> 
+    mutate(
+        n = motherYes + `motherNo`
+    ) |> 
+    rename(
+        "y" = motherYes
+    ) |> 
+    arrange(
+        year, age
+    )
+
+# Combine p, y, and n into one df at US level
+df.cps.us <-
+    df.cps.y.us |> 
+    dplyr::select(
+        year, age, y, n 
+    ) |> 
+    left_join(
+        df.cps.p.us,
+        by = c("year", "age")
+    ) 
+
+
+# Weighted motherhood prop. by age at RACE level
+df.cps.p.race <- tibble(
+    svyby( ~ p , ~ race_eth + year + age, cps_design , svymean )
+) |> 
+    mutate(
+        l95 = p - (1.96 * se),
+        u95 = p + (1.96 *se)
+    ) |> 
+    arrange(
+        race_eth, year, age
+    )
+
+# Weighted count of mother by age at RACE level
+df.cps.y.race <- tibble(
+    svyby( ~ mother , ~ race_eth + year + age, cps_design , svytotal)
+    ) |> 
+    mutate(
+        n = motherYes + `motherNo`
+    ) |> 
+    rename(
+        "y" = motherYes
+    ) |> 
+    arrange(
+        race_eth, year, age
+    )
+
+# Combine p, y, and n into one df at RACE level
+df.cps.race <-
+    df.cps.y.race |> 
+    dplyr::select(
+        race_eth, year, age, y, n 
+        ) |> 
+    left_join(
+        df.cps.p.race,
+        by = c("race_eth", "year", "age")
+    ) 
+
+# Weighted motherhood prop. by age at STATE level
+
+# !!! NOT ENOUGH MEMORY !!!
+df.cps.p.state <- tibble(
+    svyby( ~ p , ~ state + year + age, cps_design , svymean )
+) |> 
+    mutate(
+        l95 = p - (1.96 * se),
+        u95 = p + (1.96 *se)
+    ) |> 
+    arrange(
+        state, year, age
+    )
+
+# Weighted count of mother by age at STATE level
+df.cps.y.state <- tibble(
+    svyby( ~ mother , ~ state + year + age, cps_design , svytotal)
+) |> 
+    mutate(
+        n = motherYes + `motherNo`
+    ) |> 
+    rename(
+        "y" = motherYes
+    ) |> 
+    arrange(
+        state, year, age
+    )
+
+# Combine p, y, and n into one df at STATE level
+df.cps.state <-
+    df.cps.y.state |> 
+    dplyr::select(
+        state, year, age, y, n 
+    ) |> 
+    left_join(
+        df.cps.p.state,
+        by = c("state", "year", "age")
+    ) 
 
 
 
@@ -280,8 +426,10 @@ saveRDS(data.nsfg,
 data.nsfg <- 
     data.nsfg |> 
     mutate(
-        ## Create 5 variables for parity (to be used with svyby())
-        mother = ifelse(parity == 0, 0, 1),
+        # Prop mother
+        p = ifelse(parity == 0, 0, 1),
+        # Categorical variable for counts with surey()
+        mother = ifelse(parity == 0, "No", "Yes"),
         # Name abbridged race
         race_eth = case_when(
             hisprace2 == 1 ~ "Hispanic",
@@ -289,10 +437,6 @@ data.nsfg <-
             hisprace2 == 3 ~ "NH-Black",
             hisprace2 == 4 ~ "NH-Other"
         )
-    ) |> 
-    filter(
-        # Only consider most populous subpopulations
-        race_eth != "NH-Other"
     )
 
 # Complex survey design
@@ -305,13 +449,43 @@ nsfg_design <-
         nest = TRUE 
     )
 
-# Weighted prop of mother by age and race
-df.nsfg <- tibble(
-    svyby( ~ mother , ~ age + race_eth + period, nsfg_design , svymean )
+# Weighted prop of mother by age at US level
+df.nsfg.p.us <- tibble(
+    svyby( ~ p , ~ period + age, nsfg_design , svymean )
 ) |> 
     mutate(
-        l95 = mother - (1.96 * se),
-        u95 = mother + (1.96 *se),
+        l95 = p - (1.96 * se),
+        u95 = p + (1.96 *se)
+    ) |> 
+    arrange(
+        period, age
+    )
+
+# Weighted count of mother by age at US level
+df.nsfg.y.us <- tibble(
+    svyby( ~ mother , ~ period + age, nsfg_design , svytotal)
+) |> 
+    mutate(
+        n = motherYes + `motherNo`
+    ) |> 
+    rename(
+        "y" = motherYes
+    ) |> 
+    arrange(
+        period, age
+    )
+
+# Combine p, y, and n into one df at US level
+df.nsfg.us <-
+    df.nsfg.y.us |> 
+    dplyr::select(
+        period, age, y, n 
+    ) |> 
+    left_join(
+        df.nsfg.p.us,
+        by = c("period", "age")
+    ) |> 
+    mutate(
         year = case_when(
             period == "2006_2010" ~ 2008,
             period == "2011_2013" ~ 2012,
@@ -321,50 +495,155 @@ df.nsfg <- tibble(
         )
     )
 
+# Weighted prop of mother by age at RACE level
+df.nsfg.p.race <- tibble(
+    svyby( ~ p , ~ race_eth + period + age, nsfg_design , svymean )
+) |> 
+    mutate(
+        l95 = p - (1.96 * se),
+        u95 = p + (1.96 *se)
+    ) |> 
+    arrange(
+        race_eth, period, age
+    )
+
+# Weighted count of mother by age at RACE level
+df.nsfg.y.race <- tibble(
+    svyby( ~ mother , ~ race_eth + period + age, nsfg_design , svytotal)
+) |> 
+    mutate(
+        n = motherYes + `motherNo`
+    ) |> 
+    rename(
+        "y" = motherYes
+    ) |> 
+    arrange(
+        race_eth, period, age
+    )
+
+# Combine p, y, and n into one df at RACE level
+df.nsfg.race <-
+    df.nsfg.y.race |> 
+    dplyr::select(
+        race_eth, period, age, y, n 
+    ) |> 
+    left_join(
+        df.nsfg.p.race,
+        by = c("race_eth", "period", "age")
+    ) |> 
+    mutate(
+        year = case_when(
+            period == "2006_2010" ~ 2008,
+            period == "2011_2013" ~ 2012,
+            period == "2013_2015" ~ 2014,
+            period == "2015_2017" ~ 2016,
+            period == "2017_2019" ~ 2018,
+        )
+    )
+
+# NSFG data does not allow to get estimates at the state level
+
 
 ## ===== COMBINE THE TWO TIDY DF ===============================================
 
-df <- bind_rows(
-    df.cps |> 
+# US level
+df.us <- bind_rows(
+    df.cps.us |> 
         mutate(
             survey = "CPS"
         ),
-    df.nsfg |> 
+    df.nsfg.us |> 
         mutate(
             survey = "NSFG"
         )
 )
 
+# Store the tidy data
+saveRDS(
+    df.us,
+    here(
+        "data",
+        "df_us.rds"
+    ),
+    compress = "xz"
+)
+
+# Race level
+df.race <- bind_rows(
+    df.cps.race |> 
+        mutate(
+            survey = "CPS"
+        ),
+    df.nsfg.race |> 
+        mutate(
+            survey = "NSFG"
+        )
+)
+
+# Store the tidy data
+saveRDS(
+    df.race,
+    here(
+        "data",
+        "df_race.rds"
+    ),
+    compress = "xz"
+)
+
+# State level !!!!
+
     
 
 ## VISUALIZATION ===============================================================
 
-df.cps |> 
+# Check computed proportions of mother 
+df.race |> 
     ggplot(aes(x = age,
-               y = mother,
+               y = p,
                ymin = l95,
                ymax = u95,
                group = year,
                col = year)) +
-    facet_wrap(~ race_eth) +
+    facet_grid(survey ~ race_eth) +
     geom_line() +
     geom_point() +
     geom_pointrange() +
     theme_bw()
 
-
-df |> 
+# Check if weighted prop. agrees with counts in CPS
+df.cps.race |> 
     ggplot(aes(x = age,
-               y = mother,
-               ymin = l95,
-               ymax = u95,
+               y = p)) +
+    facet_grid(race_eth ~ year) +
+    geom_line(aes(y = p, col = "Prop."),
+              alpha = .2) +
+    geom_point(aes(y = p, col = "Prop."),
+               alpha = .2) +
+    geom_line(aes(y = y / n, col = "Count"),
+              alpha = .2) +
+    geom_point(aes(y = y / n, col = "Count"),
+               alpha = .2) +
+    theme_bw() +
+    scale_color_manual(values = c("Prop." = "red4",
+                                  "Count" = "skyblue3"))
+# The two corresponds!
+
+
+# Compare data from NSFG and CPS
+df.race |> 
+    ggplot(aes(x = age,
+               y = y / n,
                group = survey,
                col = survey)) +
     facet_grid(race_eth ~ year) +
     geom_line() +
     geom_point() +
-    geom_pointrange() +
-    theme_bw()
+    theme_bw() +
+    labs(
+        y = "Prop. Mother",
+        x = "Age"
+    )
+    
 
 
 
