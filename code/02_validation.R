@@ -3,7 +3,8 @@
 ##
 ##  Project title: Modeling of childlessness
 ##
-##  This code compares proportion of childless women with the ones
+##  This code compares proportion of childless women after
+##  correction of 2008 and 2010 data with the ones
 ##  obtained from the US Census Bureau's report.
 ##
 ## 

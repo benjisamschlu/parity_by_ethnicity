@@ -240,6 +240,12 @@ df.cps.y.us <- tibble(
     ) |> 
     arrange(
         year, age
+    ) |> 
+    filter(
+        # Remove cases where y==0 and y==n:
+        # Unobserved & log(p / (1-p)) is undefined
+        y != 0,
+        y != n
     )
 
 # Combine p, y, and n into one df at US level
@@ -278,6 +284,12 @@ df.cps.y.race <- tibble(
     ) |> 
     arrange(
         race_eth, year, age
+    ) |> 
+    filter(
+        # Remove cases where y==0 and y==n:
+        # Unobserved & log(p / (1-p)) is undefined
+        y != 0,
+        y != n
     )
 
 # Combine p, y, and n into one df at RACE level
@@ -389,6 +401,12 @@ list.data.nsfg <- lapply(dwld.period,
                            } else { 
                                wgt_var <- "wgtq1q16"
                            }
+                           # Different age bounds according to the period
+                           if (p %in% c("2006_2010", "2011_2013", "2013_2015")) {
+                               age_bnd <- 45
+                           } else { 
+                               age_bnd <- 50
+                           }
                            # Select variables of interest
                            nsfg_df <- data.frame( nsfg_tbl ) |> 
                                dplyr::select(
@@ -397,6 +415,11 @@ list.data.nsfg <- lapply(dwld.period,
                                rename(
                                    # Harmonize weight var name to row bind later
                                    "wgt" = !!sym(wgt_var)
+                               ) |> 
+                               filter(
+                                   # Remove age that shouldn't be surveyed
+                                   age < age_bnd
+                                   
                                ) |> 
                                mutate(
                                    # Var for period
@@ -437,7 +460,7 @@ data.nsfg <-
             hisprace2 == 3 ~ "NH-Black",
             hisprace2 == 4 ~ "NH-Other"
         )
-    )
+    ) 
 
 # Complex survey design
 nsfg_design <- 
@@ -473,6 +496,12 @@ df.nsfg.y.us <- tibble(
     ) |> 
     arrange(
         period, age
+    ) |> 
+    filter(
+        # Remove cases where y==0 and y==n:
+        # Unobserved & log(p / (1-p)) is undefined
+        y != 0,
+        y != n
     )
 
 # Combine p, y, and n into one df at US level
@@ -519,6 +548,12 @@ df.nsfg.y.race <- tibble(
     ) |> 
     arrange(
         race_eth, period, age
+    ) |> 
+    filter(
+        # Remove cases where y==0 and y==n:
+        # Unobserved & log(p / (1-p)) is undefined
+        y != 0,
+        y != n
     )
 
 # Combine p, y, and n into one df at RACE level
@@ -594,58 +629,3 @@ saveRDS(
 
     
 
-## VISUALIZATION ===============================================================
-
-# Check computed proportions of mother 
-df.race |> 
-    ggplot(aes(x = age,
-               y = p,
-               ymin = l95,
-               ymax = u95,
-               group = year,
-               col = year)) +
-    facet_grid(survey ~ race_eth) +
-    geom_line() +
-    geom_point() +
-    geom_pointrange() +
-    theme_bw()
-
-# Check if weighted prop. agrees with counts in CPS
-df.cps.race |> 
-    ggplot(aes(x = age,
-               y = p)) +
-    facet_grid(race_eth ~ year) +
-    geom_line(aes(y = p, col = "Prop."),
-              alpha = .2) +
-    geom_point(aes(y = p, col = "Prop."),
-               alpha = .2) +
-    geom_line(aes(y = y / n, col = "Count"),
-              alpha = .2) +
-    geom_point(aes(y = y / n, col = "Count"),
-               alpha = .2) +
-    theme_bw() +
-    scale_color_manual(values = c("Prop." = "red4",
-                                  "Count" = "skyblue3"))
-# The two corresponds!
-
-
-# Compare data from NSFG and CPS
-df.race |> 
-    ggplot(aes(x = age,
-               y = y / n,
-               group = survey,
-               col = survey)) +
-    facet_grid(race_eth ~ year) +
-    geom_line() +
-    geom_point() +
-    theme_bw() +
-    labs(
-        y = "Prop. Mother",
-        x = "Age"
-    )
-    
-
-
-
-
-    
