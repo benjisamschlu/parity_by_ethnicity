@@ -627,6 +627,54 @@ expand.grid(
     labs(x = "Age",
          y = "Proportion mothers")
 
+# pars - US
+df.pars.us |> 
+    ggplot(aes(x = year,
+               y = median,
+               ymin = lower95,
+               ymax = upper95)) +
+    facet_wrap(~ par,
+               scales = "free_y") +
+    geom_ribbon(col = NA,
+                alpha = .3) +
+    geom_line() +
+    theme_bw()
+
+# To understand evolution of c and k together 
+# when U and L are fixed
+it <- 50
+c.i <- seq(1.7, 2.3, length.out = it)
+k.i <- seq(0.015, 0.0025, length.out = it)
+L.i <- seq(0.010, 0.0125, length.out = it)
+U.i <- seq(0.857, 0.843, length.out = it)
+
+df.pars.evol <- lapply(1:it, function(i) {
+    
+    df.out <- tibble(
+        x = 0:35,
+        y = get_jano(U.i[i], L.i[i], k.i[i], c.i[i], 0:35),
+        t = i
+        )
+})
+df.pars.evol <- do.call("rbind", df.pars.evol)
+
+df.pars.evol |> 
+    ggplot(aes(x = x,
+               y = y,
+               group = t,
+               col = t)) +
+    geom_line() +
+    theme_bw()
+
+df.pars.evol |> 
+    filter(t %in% c(1, 25, 50)) |> 
+    ggplot(aes(x = x,
+               y = y,
+               group = t,
+               col = t)) +
+    geom_line() +
+    theme_bw()
+
 
 # p - race
 expand.grid(

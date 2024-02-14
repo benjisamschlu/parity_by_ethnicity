@@ -303,44 +303,64 @@ df.cps.race <-
         by = c("race_eth", "year", "age")
     ) 
 
-# Weighted motherhood prop. by age at STATE level
+# Not enough memory to run over all states so loop over state
+state.names <- unique(data.cps.cor$state)
 
-# !!! NOT ENOUGH MEMORY !!!
-df.cps.p.state <- tibble(
-    svyby( ~ p , ~ state + year + age, cps_design , svymean )
-) |> 
-    mutate(
-        l95 = p - (1.96 * se),
-        u95 = p + (1.96 *se)
+df.cps.state <- lapply(state.names, function(s) {
+    
+    # Compute proportions of mother and SE accounting for weights
+    # Complex survey design
+    cps_design <- 
+        svydesign( 
+            id = ~ hhid , 
+            data = data.cps.cor |> 
+                filter(
+                    state == s
+                ), 
+            weights = ~ wtfinl
+        )
+    
+    # Weighted motherhood prop. by age at STATE level
+    df.cps.p.state <- tibble(
+        svyby( ~ p , ~ state + year + age, cps_design , svymean )
     ) |> 
+        mutate(
+            l95 = p - (1.96 * se),
+            u95 = p + (1.96 *se)
+        )
+    
+    # Weighted count of mother by age at STATE level
+    df.cps.y.state <- tibble(
+        svyby( ~ mother , ~ state + year + age, cps_design , svytotal)
+    ) |> 
+        mutate(
+            n = motherYes + `motherNo`
+        ) |> 
+        rename(
+            "y" = motherYes
+        ) |> 
+        filter(
+            # Remove cases where y==0 and y==n:
+            # Unobserved & log(p / (1-p)) is undefined
+            y != 0,
+            y != n
+        )
+    
+    # Combine p, y, and n into one df at STATE level
+    df.cps.state.y.p <-
+        df.cps.y.state |> 
+        dplyr::select(
+            state, year, age, y, n 
+        ) |> 
+        left_join(
+            df.cps.p.state,
+            by = c("state", "year", "age")
+        ) 
+})
+df.cps.state <- do.call("rbind", df.cps.state) |> 
     arrange(
         state, year, age
     )
-
-# Weighted count of mother by age at STATE level
-df.cps.y.state <- tibble(
-    svyby( ~ mother , ~ state + year + age, cps_design , svytotal)
-) |> 
-    mutate(
-        n = motherYes + `motherNo`
-    ) |> 
-    rename(
-        "y" = motherYes
-    ) |> 
-    arrange(
-        state, year, age
-    )
-
-# Combine p, y, and n into one df at STATE level
-df.cps.state <-
-    df.cps.y.state |> 
-    dplyr::select(
-        state, year, age, y, n 
-    ) |> 
-    left_join(
-        df.cps.p.state,
-        by = c("state", "year", "age")
-    ) 
 
 
 
@@ -625,7 +645,14 @@ saveRDS(
     compress = "xz"
 )
 
-# State level !!!!
+# State level (only from CPS)
+saveRDS(
+    df.cps.state,
+    here("data", 
+         "df_state.rds"
+         ),
+    compress = "xz"
+)
 
     
 
